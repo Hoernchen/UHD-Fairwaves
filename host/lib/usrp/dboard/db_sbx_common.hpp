@@ -1,5 +1,5 @@
 //
-// Copyright 2011 Ettus Research LLC
+// Copyright 2011-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
 #define LOCKDET_MASK    (1 << 0)                // INPUT!!!
 
 // TX IO Pins
-#define TRSW            (1 << 14)               // 0 = TX, 1 = RX 
+#define TRSW            (1 << 14)               // 0 = TX, 1 = RX
 #define TX_LED_TXRX     (1 << 7)                // LED for TX Antenna Selection TX/RX
 #define TX_LED_LD       (1 << 6)                // LED for TX Lock Detect
 #define DIS_POWER_TX    (1 << 5)                // on UNIT_TX, 0 powers up TX
@@ -43,8 +43,8 @@
 #define RX_ATTN_MASK    (63 << RX_ATTN_SHIFT)   // valid bits of RX Attenuator Control
 
 // TX Attenuator Pins
-#define TX_ATTN_SHIFT   8                       // lsb of RX Attenuator Control
-#define TX_ATTN_MASK    (63 << TX_ATTN_SHIFT)   // valid bits of RX Attenuator Control
+#define TX_ATTN_SHIFT   8                       // lsb of TX Attenuator Control
+#define TX_ATTN_MASK    (63 << TX_ATTN_SHIFT)   // valid bits of TX Attenuator Control
 
 // Mixer functions
 #define TX_MIXER_ENB    (SYNTH_PDBRF|TX_ENABLE)
@@ -138,6 +138,7 @@ protected:
     uhd::dict<std::string, double> _tx_gains, _rx_gains;
     double       _rx_lo_freq, _tx_lo_freq;
     std::string  _tx_ant, _rx_ant;
+    bool _rx_lo_lock_cache, _tx_lo_lock_cache;
 
     void set_rx_ant(const std::string &ant);
     void set_tx_ant(const std::string &ant);

@@ -1,5 +1,5 @@
 //
-// Copyright 2010 Ettus Research LLC
+// Copyright 2010,2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -154,6 +154,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     usrp->set_rx_antenna("CAL");
     usrp->set_tx_antenna("CAL");
 
+    //fail if daughterboard has no serial
+    check_for_empty_serial(usrp, "RX", "rx", args);
+
     //set optimum defaults
     set_optimum_defaults(usrp);
 
@@ -192,7 +195,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         if (vm.count("verbose")) printf("bb_imag_freq = %0.2f MHz\n", bb_imag_freq/1e6);
 
         //capture initial uncorrected value
-        usrp->set_rx_iq_balance(std::polar<double>(1.0, 0.0));
+        usrp->set_rx_iq_balance(0.0);
         capture_samples(usrp, rx_stream, buff, nsamps);
         const double initial_tone_dbrms = compute_tone_dbrms(buff, bb_tone_freq/actual_rx_rate);
         const double initial_image_dbrms = compute_tone_dbrms(buff, bb_imag_freq/actual_rx_rate);
@@ -219,7 +222,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             for (double ampl_corr = ampl_corr_start; ampl_corr <= ampl_corr_stop + ampl_corr_step/2; ampl_corr += ampl_corr_step){
                 if (vm.count("verbose")) printf("    phase_corr = %0.2f ampl_corr = %0.2f", phase_corr, ampl_corr);
 
-                const std::complex<double> correction = std::polar(ampl_corr+1, phase_corr*tau);
+                const std::complex<double> correction(ampl_corr, phase_corr);
                 usrp->set_rx_iq_balance(correction);
 
                 //receive some samples

@@ -82,13 +82,29 @@ SET_SOURCE_FILES_PROPERTIES(
 ########################################################################
 # Setup UDP
 ########################################################################
-LIBUHD_APPEND_SOURCES(${CMAKE_CURRENT_SOURCE_DIR}/udp_zero_copy.cpp)
+IF(WIN32)
+    LIBUHD_APPEND_SOURCES(${CMAKE_CURRENT_SOURCE_DIR}/udp_wsa_zero_copy.cpp)
+ELSE()
+    LIBUHD_APPEND_SOURCES(${CMAKE_CURRENT_SOURCE_DIR}/udp_zero_copy.cpp)
+ENDIF()
 
 #On windows, the boost asio implementation uses the winsock2 library.
 #Note: we exclude the .lib extension for cygwin and mingw platforms.
 IF(WIN32)
     LIBUHD_APPEND_LIBS(ws2_32)
 ENDIF()
+
+#atlbase.h is not included with visual studio express
+#conditionally check for atlbase.h and define if found
+INCLUDE(CheckIncludeFileCXX)
+CHECK_INCLUDE_FILE_CXX(atlbase.h HAVE_ATLBASE_H)
+IF(HAVE_ATLBASE_H)
+    SET_SOURCE_FILES_PROPERTIES(
+        ${CMAKE_CURRENT_SOURCE_DIR}/udp_zero_copy.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/udp_wsa_zero_copy.cpp
+        PROPERTIES COMPILE_DEFINITIONS "HAVE_ATLBASE_H"
+    )
+ENDIF(HAVE_ATLBASE_H)
 
 ########################################################################
 # Append to the list of sources for lib uhd

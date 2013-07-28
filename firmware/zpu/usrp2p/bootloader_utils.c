@@ -85,8 +85,8 @@ void do_the_bootload_thing(void) {
 			icap_s3_reload_fpga(PROD_FPGA_IMAGE_LOCATION_ADDR);
 #endif
 		}
-		puts("No valid production FPGA image found.\n");
-//		return;
+		puts("No valid production FPGA image found.\nFalling through to built-in firmware.");
+		//return;
 	}
 	if(is_valid_fw_image(PROD_FW_IMAGE_LOCATION_ADDR)) {
 		puts("Valid production firmware found. Loading...");
@@ -122,5 +122,4 @@ void do_the_bootload_thing(void) {
 	}
     puts("ERROR: no safe firmware image available. Falling through to built-in firmware.");
     */
-#endif
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2011 Ettus Research LLC
+ * Copyright 2010-2012 Ettus Research LLC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -58,29 +58,28 @@ static void handle_udp_data_packet(
     //handle ICMP destination unreachable
     if (payload == NULL) switch(src.port){
     case USRP2_UDP_RX_DSP0_PORT:
-        //the end continuous streaming command
-        sr_rx_ctrl0->cmd = 1 << 31 | 1 << 28; //no samples now
-        sr_rx_ctrl0->time_secs = 0;
-        sr_rx_ctrl0->time_ticks = 0; //latch the command
-        break;
+        //reset dsp to stop streaming
+        sr_rx_ctrl0->clear = 1;
+        fw_regs[U2_FW_REG_LOCK_TIME] = 0; //force an unlock
+        return;
 
     case USRP2_UDP_RX_DSP1_PORT:
-        //the end continuous streaming command
-        sr_rx_ctrl1->cmd = 1 << 31 | 1 << 28; //no samples now
-        sr_rx_ctrl1->time_secs = 0;
-        sr_rx_ctrl1->time_ticks = 0; //latch the command
-        break;
+        //reset dsp to stop streaming
+        sr_rx_ctrl1->clear = 1;
+        fw_regs[U2_FW_REG_LOCK_TIME] = 0; //force an unlock
+        return;
 
     case USRP2_UDP_TX_DSP0_PORT:
         //end async update packets per second
         sr_tx_ctrl0->cyc_per_up = 0;
-        break;
+        fw_regs[U2_FW_REG_LOCK_TIME] = 0; //force an unlock
+        return;
 
     case USRP2_UDP_TX_DSP1_PORT:
         //end async update packets per second
         sr_tx_ctrl1->cyc_per_up = 0;
-        break;
-
+        fw_regs[U2_FW_REG_LOCK_TIME] = 0; //force an unlock
+        return;
     default: return;
     }
 
@@ -99,15 +98,45 @@ static void handle_udp_data_packet(
         which = 1;
         break;
 
-    case USRP2_UDP_TX_DSP1_PORT:
+    case USRP2_UDP_FIFO_CRTL_PORT:
         which = 3;
         break;
 
+    case USRP2_UDP_TX_DSP1_PORT:
+        which = 4;
+        break;
     default: return;
     }
 
-    eth_mac_addr_t eth_mac_host; arp_cache_lookup_mac(&src.addr, &eth_mac_host);
-    setup_framer(eth_mac_host, *ethernet_mac_addr(), src, dst, which);
+    //assume the packet destination is the packet source
+    //the arp cache lookup should never fail for this case
+    const struct socket_address src_addr = dst;
+    struct socket_address dst_addr = src;
+    eth_mac_addr_t eth_mac_dst;
+    arp_cache_lookup_mac(&dst_addr.addr, &eth_mac_dst);
+
+    //however, if this control packet has an alternative destination...
+    if (payload_len >= sizeof(usrp2_stream_ctrl_t)){
+
+        //parse the destination ip addr and udp port from the payload
+        const usrp2_stream_ctrl_t *stream_ctrl = (const usrp2_stream_ctrl_t *)payload;
+        dst_addr.addr.addr = stream_ctrl->ip_addr;
+        dst_addr.port = (uint16_t)stream_ctrl->udp_port;
+        struct ip_addr ip_dest = dst_addr.addr;
+
+        //are we in the subnet? if not use the gateway
+        const uint32_t subnet_mask = get_subnet()->addr;
+        const bool in_subnet = ((get_ip_addr()->addr & subnet_mask) == (ip_dest.addr & subnet_mask));
+        if (!in_subnet) ip_dest = *get_gateway();
+
+        //lookup the host ip address with ARP (this may fail)
+        const bool ok = arp_cache_lookup_mac(&ip_dest, &eth_mac_dst);
+        if (!ok) net_common_send_arp_request(&ip_dest);
+        const uint32_t result = (ok)? 0 : ~0;
+        send_udp_pkt(dst.port, src, &result, sizeof(result));
+    }
+
+    setup_framer(eth_mac_dst, *ethernet_mac_addr(), dst_addr, src_addr, which);
 }
 
 #define OTW_GPIO_BANK_TO_NUM(bank) \
@@ -195,8 +224,8 @@ static void handle_udp_ctrl_packet(
                 ctrl_data_in->data.spi_args.dev,      //which device
                 ctrl_data_in->data.spi_args.data,     //32 bit data
                 ctrl_data_in->data.spi_args.num_bits, //length in bits
-                (ctrl_data_in->data.spi_args.mosi_edge == USRP2_CLK_EDGE_RISE)? SPIF_PUSH_FALL : SPIF_PUSH_RISE |
-                (ctrl_data_in->data.spi_args.miso_edge == USRP2_CLK_EDGE_RISE)? SPIF_LATCH_RISE : SPIF_LATCH_FALL
+                ((ctrl_data_in->data.spi_args.mosi_edge == USRP2_CLK_EDGE_RISE)? SPI_PUSH_FALL : SPI_PUSH_RISE) |
+                ((ctrl_data_in->data.spi_args.miso_edge == USRP2_CLK_EDGE_RISE)? SPI_LATCH_RISE : SPI_LATCH_FALL)
             );
 
             //load output
@@ -327,6 +356,7 @@ int
 main(void)
 {
   u2_init();
+  arp_cache_init();
 #ifdef BOOTLOADER
   putstr("\nUSRP N210 UDP bootloader\n");
 #else
@@ -342,8 +372,7 @@ main(void)
   //load the production FPGA image or firmware if appropriate
   do_the_bootload_thing();
   //if we get here we've fallen through to safe firmware
-  set_default_mac_addr();
-  set_default_ip_addr();
+  eth_addrs_set_default();
 #endif
 
 #ifdef UMTRX
@@ -363,6 +392,7 @@ main(void)
   register_udp_listener(USRP2_UDP_RX_DSP0_PORT, handle_udp_data_packet);
   register_udp_listener(USRP2_UDP_RX_DSP1_PORT, handle_udp_data_packet);
   register_udp_listener(USRP2_UDP_TX_DSP0_PORT, handle_udp_data_packet);
+  register_udp_listener(USRP2_UDP_FIFO_CRTL_PORT, handle_udp_data_packet);
   register_udp_listener(USRP2_UDP_TX_DSP1_PORT, handle_udp_data_packet);
   
 #ifdef USRP2P

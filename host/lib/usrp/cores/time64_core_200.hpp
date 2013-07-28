@@ -1,5 +1,5 @@
 //
-// Copyright 2011 Ettus Research LLC
+// Copyright 2011-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -31,8 +31,8 @@ public:
     typedef boost::shared_ptr<time64_core_200> sptr;
 
     struct readback_bases_type{
-        size_t rb_secs_now, rb_ticks_now;
-        size_t rb_secs_pps, rb_ticks_pps;
+        size_t rb_hi_now, rb_lo_now;
+        size_t rb_hi_pps, rb_lo_pps;
     };
 
     //! makes a new time64 core from iface and slave base
@@ -41,6 +41,8 @@ public:
         const readback_bases_type &readback_bases,
         const size_t mimo_delay_cycles = 0 // 0 means no-mimo
     );
+
+    virtual void enable_gpsdo(void) = 0;
 
     virtual void set_tick_rate(const double rate) = 0;
 

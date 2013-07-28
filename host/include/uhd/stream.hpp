@@ -1,5 +1,5 @@
 //
-// Copyright 2011 Ettus Research LLC
+// Copyright 2011-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -53,9 +53,9 @@ struct UHD_API stream_args_t{
      *  - fc64 - complex<double>
      *  - fc32 - complex<float>
      *  - sc16 - complex<int16_t>
+     *  - sc8 - complex<int8_t>
      *
      * The following are not implemented, but are listed to demonstrate naming convention:
-     *  - sc8 - complex<int8_t>
      *  - f32 - float
      *  - f64 - double
      *  - s16 - int16_t
@@ -79,14 +79,26 @@ struct UHD_API stream_args_t{
      * The args parameter is used to pass arbitrary key/value pairs.
      * Possible keys used by args (depends on implementation):
      *
-     * - scalar: an integer scaling factor used with the sc8 wire format.
-     * The key/value pair scalar=1024 means that the sample in the DSP
-     * was multiplied by 1024 before its upper 8 bits were harvested.
+     * - fullscale: specifies the full-scale amplitude when using floats.
+     * By default, the fullscale amplitude under floating point is 1.0.
+     * Set the "fullscale" to scale the samples in the host to the
+     * expected input range and/or output range of your application.
+     *
+     * - peak: specifies a fractional sample level to calculate scaling with the sc8 wire format.
+     * When using sc8 samples over the wire, the device must scale samples
+     * (both on the host and in the device) to satisfy the dynamic range needs.
+     * The peak value specifies a fraction of the maximum sample level (1.0 = 100%).
+     * Set peak to max_sample_level/full_scale_level to ensure optimum dynamic range.
      *
      * - underflow_policy: how the TX DSP should recover from underflow.
      * Possible options are "next_burst" or "next_packet".
      * In the "next_burst" mode, the DSP drops incoming packets until a new burst is started.
      * In the "next_packet" mode, the DSP starts transmitting again at the next packet.
+     *
+     * - spp: (samples per packet) controls the size of RX packets.
+     * When not specified, the packets are always maximum frame size.
+     * Users should specify this option to request smaller than default
+     * packets, probably with the intention of reducing packet latency.
      *
      * The following are not implemented, but are listed for conceptual purposes:
      * - function: magnitude or phase/magnitude

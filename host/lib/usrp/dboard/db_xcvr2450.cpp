@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -29,7 +29,7 @@
 #define HB_PA_TXIO               LB_PA_OFF_TXIO
 #define LB_PA_TXIO               HB_PA_OFF_TXIO
 #define TX_ENB_TXIO              TX_EN_TXIO
-#define TX_DIS_TXIO              0
+#define TX_DIS_TXIO              (HB_PA_OFF_TXIO | LB_PA_OFF_TXIO)
 #define AD9515DIV_3_TXIO         AD9515DIV_TXIO
 #define AD9515DIV_2_TXIO         0
 
@@ -171,8 +171,8 @@ private:
         }
 
         //constants for the rssi calculation
-        static const double min_v = 0.5, max_v = 2.5;
-        static const double rssi_dyn_range = 60;
+        static const double min_v = 2.5, max_v = 0.5;
+        static const double rssi_dyn_range = 60.0;
         //calculate the rssi from the voltage
         double voltage = this->get_iface()->read_aux_adc(dboard_iface::UNIT_RX, dboard_iface::AUX_ADC_B);
         double rssi = max_power - rssi_dyn_range*(voltage - min_v)/(max_v - min_v);
@@ -190,6 +190,7 @@ static dboard_base::sptr make_xcvr2450(dboard_base::ctor_args_t args){
 UHD_STATIC_BLOCK(reg_xcvr2450_dboard){
     //register the factory function for the rx and tx dbids
     dboard_manager::register_dboard(0x0061, 0x0060, &make_xcvr2450, "XCVR2450");
+    dboard_manager::register_dboard(0x0061, 0x0059, &make_xcvr2450, "XCVR2450 - r2.1");
 }
 
 /***********************************************************************
@@ -228,7 +229,7 @@ xcvr2450::xcvr2450(ctor_args_t args) : xcvr_dboard_base(args){
     // Register RX properties
     ////////////////////////////////////////////////////////////////////
     this->get_rx_subtree()->create<std::string>("name")
-        .set(get_rx_id().to_pp_string());
+        .set("XCVR2450 RX");
     this->get_rx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .publish(boost::bind(&xcvr2450::get_locked, this));
     this->get_rx_subtree()->create<sensor_value_t>("sensors/rssi")
@@ -266,7 +267,7 @@ xcvr2450::xcvr2450(ctor_args_t args) : xcvr_dboard_base(args){
     // Register TX properties
     ////////////////////////////////////////////////////////////////////
     this->get_tx_subtree()->create<std::string>("name")
-        .set(get_tx_id().to_pp_string());
+        .set("XCVR2450 TX");
     this->get_tx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .publish(boost::bind(&xcvr2450::get_locked, this));
     BOOST_FOREACH(const std::string &name, xcvr_tx_gain_ranges.keys()){
@@ -287,11 +288,11 @@ xcvr2450::xcvr2450(ctor_args_t args) : xcvr_dboard_base(args){
     this->get_tx_subtree()->create<std::vector<std::string> >("antenna/options")
         .set(xcvr_antennas);
     this->get_tx_subtree()->create<std::string>("connection")
-        .set("IQ");
+        .set("QI");
     this->get_tx_subtree()->create<bool>("enabled")
         .set(true); //always enabled
     this->get_tx_subtree()->create<bool>("use_lo_offset")
-        .set(true);
+        .set(false);
     this->get_tx_subtree()->create<double>("bandwidth/value")
         .coerce(boost::bind(&xcvr2450::set_tx_bandwidth, this, _1)) //complex bandpass bandwidth
         .set(2.0*_tx_bandwidth); //_tx_bandwidth in lowpass, convert to complex bandpass
@@ -370,7 +371,7 @@ double xcvr2450::set_lo_freq_core(double target_freq){
 
     //variables used in the calculation below
     double scaler = xcvr2450::is_highband(target_freq)? (4.0/5.0) : (4.0/3.0);
-    double ref_freq = this->get_iface()->get_clock_rate(dboard_iface::UNIT_TX);
+    double ref_freq = this->get_iface()->get_codec_rate(dboard_iface::UNIT_TX);
     int R, intdiv, fracdiv;
 
     //loop through values until we get a match
@@ -409,6 +410,16 @@ double xcvr2450::set_lo_freq_core(double target_freq){
 
     //new band select settings and ad9515 divider
     this->update_atr();
+
+    const bool div_ext(this->get_tx_id() == 0x0059);
+    if (div_ext)
+    {
+        this->get_iface()->set_clock_rate(dboard_iface::UNIT_TX, ref_freq/_ad9515div);
+    }
+    else
+    {
+        this->get_iface()->set_clock_rate(dboard_iface::UNIT_TX, ref_freq);
+    }
 
     //load new counters into registers
     _max2829_regs.int_div_ratio_word = intdiv;

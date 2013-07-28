@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -16,11 +16,6 @@
 //
 
 #include "usrp1_impl.hpp"
-#include "usrp_spi_defs.h"
-#include "usrp_commands.h"
-#include "fpga_regs_standard.h"
-#include "fpga_regs_common.h"
-#include "usrp_i2c_addr.h"
 #include <uhd/utils/log.hpp>
 #include <uhd/utils/safe_call.hpp>
 #include <uhd/transport/usb_control.hpp>
@@ -44,6 +39,7 @@ const boost::uint16_t USRP1_VENDOR_ID  = 0xfffe;
 const boost::uint16_t USRP1_PRODUCT_ID = 0x0002;
 const boost::uint16_t FX2_VENDOR_ID    = 0x04b4;
 const boost::uint16_t FX2_PRODUCT_ID   = 0x8613;
+static const boost::posix_time::milliseconds REENUMERATION_TIMEOUT_MS(3000);
 
 const std::vector<usrp1_impl::dboard_slot_t> usrp1_impl::_dboard_slots = boost::assign::list_of
     (usrp1_impl::DBOARD_SLOT_A)(usrp1_impl::DBOARD_SLOT_B)
@@ -80,6 +76,7 @@ static device_addrs_t usrp1_find(const device_addr_t &hint)
     // This requirement is a courtesy of libusb1.0 on windows.
 
     //find the usrps and load firmware
+    size_t found = 0;
     BOOST_FOREACH(usb_device_handle::sptr handle, usb_device_handle::get_device_list(vid, pid)) {
         //extract the firmware path for the USRP1
         std::string usrp1_fw_image;
@@ -87,11 +84,7 @@ static device_addrs_t usrp1_find(const device_addr_t &hint)
             usrp1_fw_image = find_image_path(hint.get("fw", "usrp1_fw.ihx"));
         }
         catch(...){
-            UHD_MSG(warning) << boost::format(
-                "Could not locate USRP1 firmware.\n"
-                "Please install the images package.\n"
-            );
-            return usrp1_addrs;
+            UHD_MSG(warning) << boost::format("Could not locate USRP1 firmware. %s") % print_images_error();
         }
         UHD_LOG << "USRP1 firmware image: " << usrp1_fw_image << std::endl;
 
@@ -100,29 +93,37 @@ static device_addrs_t usrp1_find(const device_addr_t &hint)
         catch(const uhd::exception &){continue;} //ignore claimed
 
         fx2_ctrl::make(control)->usrp_load_firmware(usrp1_fw_image);
+        found++;
     }
 
     //get descriptors again with serial number, but using the initialized VID/PID now since we have firmware
     vid = USRP1_VENDOR_ID;
     pid = USRP1_PRODUCT_ID;
 
-    BOOST_FOREACH(usb_device_handle::sptr handle, usb_device_handle::get_device_list(vid, pid)) {
-        usb_control::sptr control;
-        try{control = usb_control::make(handle, 0);}
-        catch(const uhd::exception &){continue;} //ignore claimed
+    const boost::system_time timeout_time = boost::get_system_time() + REENUMERATION_TIMEOUT_MS;
 
-        fx2_ctrl::sptr fx2_ctrl = fx2_ctrl::make(control);
-        const mboard_eeprom_t mb_eeprom(*fx2_ctrl, mboard_eeprom_t::MAP_B000);
-        device_addr_t new_addr;
-        new_addr["type"] = "usrp1";
-        new_addr["name"] = mb_eeprom["name"];
-        new_addr["serial"] = handle->get_serial();
-        //this is a found usrp1 when the hint serial and name match or blank
-        if (
-            (not hint.has_key("name")   or hint["name"]   == new_addr["name"]) and
-            (not hint.has_key("serial") or hint["serial"] == new_addr["serial"])
-        ){
-            usrp1_addrs.push_back(new_addr);
+    //search for the device until found or timeout
+    while (boost::get_system_time() < timeout_time and usrp1_addrs.empty() and found != 0)
+    {
+        BOOST_FOREACH(usb_device_handle::sptr handle, usb_device_handle::get_device_list(vid, pid))
+        {
+            usb_control::sptr control;
+            try{control = usb_control::make(handle, 0);}
+            catch(const uhd::exception &){continue;} //ignore claimed
+
+            fx2_ctrl::sptr fx2_ctrl = fx2_ctrl::make(control);
+            const mboard_eeprom_t mb_eeprom(*fx2_ctrl, USRP1_EEPROM_MAP_KEY);
+            device_addr_t new_addr;
+            new_addr["type"] = "usrp1";
+            new_addr["name"] = mb_eeprom["name"];
+            new_addr["serial"] = handle->get_serial();
+            //this is a found usrp1 when the hint serial and name match or blank
+            if (
+                (not hint.has_key("name")   or hint["name"]   == new_addr["name"]) and
+                (not hint.has_key("serial") or hint["serial"] == new_addr["serial"])
+            ){
+                usrp1_addrs.push_back(new_addr);
+            }
         }
     }
 
@@ -200,17 +201,24 @@ usrp1_impl::usrp1_impl(const device_addr_t &device_addr){
     ////////////////////////////////////////////////////////////////////
     // Initialize the properties tree
     ////////////////////////////////////////////////////////////////////
+    _rx_dc_offset_shadow = 0;
     _tree = property_tree::make();
     _tree->create<std::string>("/name").set("USRP1 Device");
     const fs_path mb_path = "/mboards/0";
-    _tree->create<std::string>(mb_path / "name").set("USRP1 (Classic)");
+    _tree->create<std::string>(mb_path / "name").set("USRP1");
     _tree->create<std::string>(mb_path / "load_eeprom")
         .subscribe(boost::bind(&fx2_ctrl::usrp_load_eeprom, _fx2_ctrl, _1));
 
     ////////////////////////////////////////////////////////////////////
+    // create user-defined control objects
+    ////////////////////////////////////////////////////////////////////
+    _tree->create<std::pair<boost::uint8_t, boost::uint32_t> >(mb_path / "user" / "regs")
+        .subscribe(boost::bind(&usrp1_impl::set_reg, this, _1));
+
+    ////////////////////////////////////////////////////////////////////
     // setup the mboard eeprom
     ////////////////////////////////////////////////////////////////////
-    const mboard_eeprom_t mb_eeprom(*_fx2_ctrl, mboard_eeprom_t::MAP_B000);
+    const mboard_eeprom_t mb_eeprom(*_fx2_ctrl, USRP1_EEPROM_MAP_KEY);
     _tree->create<mboard_eeprom_t>(mb_path / "eeprom")
         .set(mb_eeprom)
         .subscribe(boost::bind(&usrp1_impl::set_mb_eeprom, this, _1));
@@ -268,8 +276,10 @@ usrp1_impl::usrp1_impl(const device_addr_t &device_addr){
     // create frontend control objects
     ////////////////////////////////////////////////////////////////////
     _tree->create<subdev_spec_t>(mb_path / "rx_subdev_spec")
+        .set(subdev_spec_t())
         .subscribe(boost::bind(&usrp1_impl::update_rx_subdev_spec, this, _1));
     _tree->create<subdev_spec_t>(mb_path / "tx_subdev_spec")
+        .set(subdev_spec_t())
         .subscribe(boost::bind(&usrp1_impl::update_tx_subdev_spec, this, _1));
 
     BOOST_FOREACH(const std::string &db, _dbc.keys()){
@@ -345,6 +355,9 @@ usrp1_impl::usrp1_impl(const device_addr_t &device_addr){
         tx_db_eeprom.load(*_fx2_ctrl, (db == "A")? (I2C_ADDR_TX_A) : (I2C_ADDR_TX_B));
         gdb_eeprom.load(*_fx2_ctrl, (db == "A")? (I2C_ADDR_TX_A ^ 5) : (I2C_ADDR_TX_B ^ 5));
 
+        //disable rx dc offset if LFRX
+        if (rx_db_eeprom.id == 0x000f) _tree->access<bool>(mb_path / "rx_frontends" / db / "dc_offset" / "enable").set(false);
+
         //create the properties and register subscribers
         _tree->create<dboard_eeprom_t>(mb_path / "dboards" / db/ "rx_eeprom")
             .set(rx_db_eeprom)
@@ -384,6 +397,12 @@ usrp1_impl::usrp1_impl(const device_addr_t &device_addr){
     // do some post-init tasks
     ////////////////////////////////////////////////////////////////////
     this->update_rates();
+
+    //reset cordic rates and their properties to zero
+    BOOST_FOREACH(const std::string &name, _tree->list(mb_path / "rx_dsps")){
+        _tree->access<double>(mb_path / "rx_dsps" / name / "freq" / "value").set(0.0);
+    }
+
     if (_tree->list(mb_path / "rx_dsps").size() > 0)
         _tree->access<subdev_spec_t>(mb_path / "rx_subdev_spec").set(_rx_subdev_spec);
     if (_tree->list(mb_path / "tx_dsps").size() > 0)
@@ -396,8 +415,7 @@ usrp1_impl::~usrp1_impl(void){
         this->enable_rx(false);
         this->enable_tx(false);
     )
-    _tree.reset(); //resets counts on sptrs held in tree
-    _soft_time_ctrl.reset(); //stops cmd task before proceeding
+    _soft_time_ctrl->stop(); //stops cmd task before proceeding
     _io_impl.reset(); //stops vandal before other stuff gets deconstructed
 }
 
@@ -434,7 +452,7 @@ bool usrp1_impl::has_tx_halfband(void){
  * Properties callback methods below
  **********************************************************************/
 void usrp1_impl::set_mb_eeprom(const uhd::usrp::mboard_eeprom_t &mb_eeprom){
-    mb_eeprom.commit(*_fx2_ctrl, mboard_eeprom_t::MAP_B000);
+    mb_eeprom.commit(*_fx2_ctrl, USRP1_EEPROM_MAP_KEY);
 }
 
 void usrp1_impl::set_db_eeprom(const std::string &db, const std::string &type, const uhd::usrp::dboard_eeprom_t &db_eeprom){
@@ -482,4 +500,9 @@ std::complex<double> usrp1_impl::set_rx_dc_offset(const std::string &db, const s
     }
 
     return std::complex<double>(double(i_off) * (1ul << 31), double(q_off) * (1ul << 31));
+}
+
+void usrp1_impl::set_reg(const std::pair<boost::uint8_t, boost::uint32_t> &reg)
+{
+    _iface->poke32(reg.first, reg.second);
 }

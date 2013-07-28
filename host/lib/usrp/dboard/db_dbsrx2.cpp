@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -189,7 +189,7 @@ dbsrx2::dbsrx2(ctor_args_t args) : rx_dboard_base(args){
     // Register properties
     ////////////////////////////////////////////////////////////////////
     this->get_rx_subtree()->create<std::string>("name")
-        .set(get_rx_id().to_pp_string());
+        .set("DBSRX2");
     this->get_rx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .publish(boost::bind(&dbsrx2::get_locked, this));
     BOOST_FOREACH(const std::string &name, dbsrx2_gain_ranges.keys()){
@@ -214,9 +214,13 @@ dbsrx2::dbsrx2(ctor_args_t args) : rx_dboard_base(args){
         .set(true); //always enabled
     this->get_rx_subtree()->create<bool>("use_lo_offset")
         .set(false);
+
+    double codec_rate = this->get_iface()->get_codec_rate(dboard_iface::UNIT_RX);
+
     this->get_rx_subtree()->create<double>("bandwidth/value")
         .coerce(boost::bind(&dbsrx2::set_bandwidth, this, _1))
-        .set(2.0*40.0e6); //bandwidth in lowpass, convert to complex bandpass
+        .set(2.0*(0.8*codec_rate/2.0)); //bandwidth in lowpass, convert to complex bandpass
+                                        //default to anti-alias at different codec_rate
     this->get_rx_subtree()->create<meta_range_t>("bandwidth/range")
         .set(dbsrx2_bandwidth_range);
 
@@ -253,7 +257,7 @@ double dbsrx2::set_lo_freq(double target_freq){
 
     N = (target_freq*R*ext_div)/(ref_freq); //actual spec range is (19, 251)
     intdiv = int(std::floor(N)); //  if (intdiv < 19  or intdiv > 251) continue;
-    fracdiv = std::floor((N - intdiv)*double(1 << 20));
+    fracdiv = boost::math::iround((N - intdiv)*double(1 << 20));
 
     //calculate the actual freq from the values above
     N = double(intdiv) + double(fracdiv)/double(1 << 20);

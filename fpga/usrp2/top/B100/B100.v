@@ -1,5 +1,5 @@
 //
-// Copyright 2011 Ettus Research LLC
+// Copyright 2011-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -23,8 +23,8 @@ module B100
    output [2:0] debug_led, output [31:0] debug, output [1:0] debug_clk,
 
    // GPIF
-   inout [15:0] GPIF_D, input [3:0] GPIF_CTL, output [3:0] GPIF_RDY,
-   input [1:0] GPIF_ADR, output GPIF_CS, output GPIF_SLOE, output GPIF_PKTEND,
+   inout [15:0] GPIF_D, input [3:0] GPIF_CTL, output GPIF_SLOE, 
+   output [1:0] GPIF_ADR, output GPIF_SLWR, output GPIF_SLRD, output GPIF_PKTEND,
    input IFCLK,
    
    inout SDA_FPGA, inout SCL_FPGA, // I2C
@@ -41,7 +41,8 @@ module B100
    input [11:0] adc, input RXSYNC,
   
    input PPS_IN,
-   input reset_n, output reset_codec
+   input reset_n, output reset_codec,
+   input ext_reset
    );
 
    assign reset_codec = 1;  // Believed to be active low
@@ -49,13 +50,16 @@ module B100
    // /////////////////////////////////////////////////////////////////////////
    // Clocking
    wire  clk_fpga, clk_fpga_in, reset;
+   wire gpif_clk = IFCLK;
+   wire gpif_rst;
    
    IBUFGDS #(.IOSTANDARD("LVDS_33"), .DIFF_TERM("TRUE")) 
    clk_fpga_pin (.O(clk_fpga_in),.I(CLK_FPGA_P),.IB(CLK_FPGA_N));
 
    BUFG clk_fpga_BUFG (.I(clk_fpga_in), .O(clk_fpga));
    
-   reset_sync reset_sync(.clk(clk_fpga), .reset_in(~reset_n), .reset_out(reset));
+   reset_sync reset_sync(.clk(clk_fpga), .reset_in((~reset_n) | (~ext_reset)), .reset_out(reset));
+   reset_sync reset_sync_gpif(.clk(gpif_clk), .reset_in((~reset_n) | (~ext_reset)), .reset_out(gpif_rst));
    
    // /////////////////////////////////////////////////////////////////////////
    // SPI
@@ -104,6 +108,7 @@ module B100
    // /////////////////////////////////////////////////////////////////////////
    // RX ADC -- handles deinterleaving
 
+   wire rxsync_0, rxsync_1;
    reg [11:0] rx_i, rx_q;
    wire [11:0] rx_a, rx_b;
    
@@ -142,31 +147,72 @@ module B100
    always @(posedge clk_fpga)
      if(rxsync_0)
        begin
-	  rx_i <= rx_b;
-	  rx_q <= rx_a;
+	  rx_i <= ~rx_b;
+	  rx_q <= ~rx_a;
        end
      else
        begin
-	  rx_i <= rx_a;
-	  rx_q <= rx_b;
+	  rx_i <= ~rx_a;
+	  rx_q <= ~rx_b;
        end
-   
-   // /////////////////////////////////////////////////////////////////////////
-   // Main U1E Core
-   u1plus_core u1p_c(.clk_fpga(clk_fpga), .rst_fpga(reset),
-		     .debug_led(debug_led), .debug(debug), .debug_clk(debug_clk),
-		     .debug_txd(), .debug_rxd(1'b1),
-		     .gpif_d(GPIF_D), .gpif_ctl(GPIF_CTL), .gpif_rdy(GPIF_RDY),
-		     .gpif_misc({GPIF_CS,GPIF_SLOE,GPIF_PKTEND}),
-		     .gpif_clk(IFCLK),
 
-		     .db_sda(SDA_FPGA), .db_scl(SCL_FPGA),
-		     .sclk(sclk), .sen({SEN_CODEC,SEN_TX_DB,SEN_RX_DB}), .mosi(mosi), .miso(miso),
-		     .cgen_st_status(cgen_st_status), .cgen_st_ld(cgen_st_ld),.cgen_st_refmon(cgen_st_refmon), 
-		     .cgen_sync_b(cgen_sync_b), .cgen_ref_sel(cgen_ref_sel),
-		     .io_tx(io_tx), .io_rx(io_rx),
-		     .tx_i(tx_i), .tx_q(tx_q), 
-		     .rx_i(rx_i), .rx_q(rx_q),
-		     .pps_in(PPS_IN) );
+   // /////////////////////////////////////////////////////////////////////////
+   // Main Core
+   wire [35:0] rx_data, tx_data, ctrl_data, resp_data;
+   wire rx_src_rdy, rx_dst_rdy, tx_src_rdy, tx_dst_rdy, resp_src_rdy, resp_dst_rdy, ctrl_src_rdy, ctrl_dst_rdy;
+   wire dsp_rx_run, dsp_tx_run;
+   wire [7:0] sen8;
+   assign {SEN_CODEC,SEN_TX_DB,SEN_RX_DB} = sen8[2:0];
+    wire [31:0] core_debug;
+
+   assign debug_led = {dsp_tx_run, dsp_rx_run, cgen_st_ld};
+   wire cgen_sync;
+   assign { cgen_sync_b, cgen_ref_sel } = {~cgen_sync, 1'b1};
+
+   u1plus_core #(
+`ifdef NUM_RX_DSP
+        .NUM_RX_DSPS(`NUM_RX_DSP),
+`else
+        .NUM_RX_DSPS(1),
+`endif
+        .DSP_RX_XTRA_FIFOSIZE(11),
+        .DSP_TX_XTRA_FIFOSIZE(12),
+        .USE_PACKET_PADDER(1)
+    ) core(
+         .clk(clk_fpga), .reset(reset),
+         .debug(core_debug), .debug_clk(debug_clk),
+
+         .rx_data(rx_data), .rx_src_rdy(rx_src_rdy), .rx_dst_rdy(rx_dst_rdy),
+         .tx_data(tx_data), .tx_src_rdy(tx_src_rdy), .tx_dst_rdy(tx_dst_rdy),
+         .ctrl_data(ctrl_data), .ctrl_src_rdy(ctrl_src_rdy), .ctrl_dst_rdy(ctrl_dst_rdy),
+         .resp_data(resp_data), .resp_src_rdy(resp_src_rdy), .resp_dst_rdy(resp_dst_rdy),
+
+         .dsp_rx_run(dsp_rx_run), .dsp_tx_run(dsp_tx_run),
+         .clock_sync(cgen_sync),
+
+         .db_sda(SDA_FPGA), .db_scl(SCL_FPGA),
+         .sclk(sclk), .sen(sen8), .mosi(mosi), .miso(miso),
+         .io_tx(io_tx), .io_rx(io_rx),
+         .tx_i(tx_i), .tx_q(tx_q),
+         .rx_i(rx_i), .rx_q(rx_q),
+         .pps_in(PPS_IN) );
+
+    // /////////////////////////////////////////////////////////////////////////
+    // Interface from host to/from GPIF
+    wire [31:0] gpif_debug;
+    slave_fifo slave_fifo (.gpif_clk(gpif_clk), .gpif_rst(gpif_rst), .gpif_d(GPIF_D),
+         .gpif_ctl(GPIF_CTL), .sloe(GPIF_SLOE), .slwr(GPIF_SLWR), .slrd(GPIF_SLRD),
+         .pktend(GPIF_PKTEND), .fifoadr(GPIF_ADR),
+
+         .fifo_clk(clk_fpga), .fifo_rst(reset),
+         .rx_data(rx_data), .rx_src_rdy(rx_src_rdy), .rx_dst_rdy(rx_dst_rdy),
+         .tx_data(tx_data), .tx_src_rdy(tx_src_rdy), .tx_dst_rdy(tx_dst_rdy),
+         .ctrl_data(ctrl_data), .ctrl_src_rdy(ctrl_src_rdy), .ctrl_dst_rdy(ctrl_dst_rdy),
+         .resp_data(resp_data), .resp_src_rdy(resp_src_rdy), .resp_dst_rdy(resp_dst_rdy),
+
+         .debug(gpif_debug));
+
+    //assign debug = gpif_debug;
+    assign debug = core_debug;
 
 endmodule // B100

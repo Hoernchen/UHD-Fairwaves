@@ -1,5 +1,5 @@
 //
-// Copyright 2011 Ettus Research LLC
+// Copyright 2011-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -26,17 +26,21 @@ module cross_clock_reader
         output reg [WIDTH-1:0] out
     );
 
-    reg [WIDTH-1:0] shadow;
+    reg [WIDTH-1:0] shadow0, shadow1;
+    reg [2:0] count;
 
     always @(posedge clk) begin
         if (rst) begin
             out <= DEFAULT;
-            shadow <= DEFAULT;
+            shadow0 <= DEFAULT;
+            shadow1 <= DEFAULT;
+            count <= 0;
         end
-        else if (shadow == in) begin
-            out <= shadow;
-        end
-        shadow <= in;
+        else if (shadow0 == shadow1) count <= count + 1;
+        else count <= 0;
+        shadow0 <= in;
+        shadow1 <= shadow0;
+        if (count == 3'b111) out <= shadow1;
     end
 
 endmodule //cross_clock_reader

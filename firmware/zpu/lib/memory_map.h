@@ -1,4 +1,4 @@
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 /*
  * Copyright 2007,2008,2009 Free Software Foundation, Inc.
  *
@@ -162,7 +162,8 @@ typedef struct {
 ///////////////////////////////////////////////////
 
 typedef struct {
-  volatile uint32_t _padding[8];
+  volatile uint32_t spi;
+  volatile uint32_t _padding[7];
   volatile uint32_t status;
   volatile uint32_t _unused;
   volatile uint32_t time64_secs_rb;
@@ -171,7 +172,10 @@ typedef struct {
   volatile uint32_t irqs;
 } router_status_t;
 
+#define SPI_READY_IRQ (1 << 12)
+
 #define router_status ((router_status_t *) READBACK_BASE)
+#define readback_mux ((router_status_t *) READBACK_BASE) //alias with a better name
 
 /*!
  * \brief return non-zero if we're running under the simulator
@@ -247,11 +251,13 @@ typedef struct {
 #define SR_BUF_POOL  16   // 4
 
 #ifndef UMTRX
+#define SR_SPI_CORE  20   // 3
 #define SR_RX_FRONT  24   // 5
 #else
 #define SR_RX_FRONT  20   // 5
 #define SR_RX_FRONT1  25   // 5
 #endif
+
 #define SR_RX_CTRL0  32   // 9
 #define SR_RX_DSP0   48   // 7
 #define SR_RX_CTRL1  80   // 9
@@ -275,6 +281,21 @@ typedef struct {
 #define	_SR_ADDR(sr) (SETTING_REGS_BASE + (sr) * sizeof(uint32_t))
 
 #define SR_ADDR_BLDRDONE _SR_ADDR(5)
+
+// --- spi core control regs ---
+
+typedef struct {
+  volatile uint32_t divider;
+  volatile uint32_t control;
+  volatile uint32_t data;
+} spi_core_t;
+
+#define SPI_CORE_SLAVE_SELECT_SHIFT 0
+#define SPI_CORE_NUM_BITS_SHIFT 24
+#define SPI_CORE_DATA_IN_EDGE_SHIFT 30
+#define SPI_CORE_DATA_OUT_EDGE_SHIFT 31
+
+#define spi_core ((spi_core_t *) _SR_ADDR(SR_SPI_CORE))
 
 // --- packet router control regs ---
 
@@ -341,12 +362,8 @@ typedef struct{
 // --- VITA TX CTRL regs ---
 
 typedef struct {
-  volatile uint32_t     num_chan;
-  volatile uint32_t     clear_state;	// clears out state machine, fifos,
-  volatile uint32_t     report_sid;
-  volatile uint32_t     policy;
+  volatile uint32_t     _pad[4];
   volatile uint32_t     cyc_per_up;
-  volatile uint32_t     packets_per_up;
 } sr_tx_ctrl_t;
 
 #define sr_tx_ctrl0 ((sr_tx_ctrl_t *) _SR_ADDR(SR_TX_CTRL0))
@@ -354,11 +371,8 @@ typedef struct {
 
 // --- VITA RX CTRL regs ---
 typedef struct {
-  // The following 3 are logically a single command register.
-  // They are clocked into the underlying fifo when time_ticks is written.
-  volatile uint32_t	cmd;		// {now, chain, num_samples(30)
-  volatile uint32_t	time_secs;
-  volatile uint32_t	time_ticks;
+  volatile uint32_t	_pad[3];
+  volatile uint32_t	clear;
 } sr_rx_ctrl_t;
 
 #define sr_rx_ctrl0 ((sr_rx_ctrl_t *) _SR_ADDR(SR_RX_CTRL0))

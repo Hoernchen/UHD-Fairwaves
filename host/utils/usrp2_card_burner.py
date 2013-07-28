@@ -50,7 +50,7 @@ def command(*args):
         stderr=subprocess.STDOUT,
     )
     ret = p.wait()
-    verbose = p.stdout.read().decode()
+    verbose = p.stdout.read().decode('utf-8')
     if ret != 0: raise Exception(verbose)
     return verbose
 
@@ -61,7 +61,7 @@ def get_dd_path():
         dd_path = os.path.join(tempfile.gettempdir(), 'dd.exe')
         if not os.path.exists(dd_path):
             print('Downloading dd.exe to %s'%dd_path)
-            dd_bin = urllib.request.urlopen('http://www.ettus.com/downloads/dd.exe').read()
+            dd_bin = urllib.request.urlopen('http://files.ettus.com/dd.exe').read()
             open(dd_path, 'wb').write(dd_bin)
         return dd_path
     return 'dd'

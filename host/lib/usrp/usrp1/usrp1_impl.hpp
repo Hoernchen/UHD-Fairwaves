@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -31,11 +31,33 @@
 #include <uhd/usrp/dboard_eeprom.hpp>
 #include <uhd/usrp/dboard_manager.hpp>
 #include <uhd/transport/usb_zero_copy.hpp>
+#include <boost/foreach.hpp>
 #include <boost/weak_ptr.hpp>
 #include <complex>
 
 #ifndef INCLUDED_USRP1_IMPL_HPP
 #define INCLUDED_USRP1_IMPL_HPP
+
+static const std::string USRP1_EEPROM_MAP_KEY = "B000";
+
+#define FR_RB_CAPS          3
+#define FR_MODE             13
+#define FR_DEBUG_EN         14
+#define FR_DC_OFFSET_CL_EN  15
+#define FR_ADC_OFFSET_0     16
+#define FR_ADC_OFFSET_1     17
+#define FR_ADC_OFFSET_2     18
+#define FR_ADC_OFFSET_3     19
+
+#define I2C_DEV_EEPROM      0x50
+#define I2C_ADDR_BOOT       (I2C_DEV_EEPROM | 0x0)
+#define I2C_ADDR_TX_A       (I2C_DEV_EEPROM | 0x4)
+#define I2C_ADDR_RX_A       (I2C_DEV_EEPROM | 0x5)
+#define I2C_ADDR_TX_B       (I2C_DEV_EEPROM | 0x6)
+#define I2C_ADDR_RX_B       (I2C_DEV_EEPROM | 0x7)
+
+#define SPI_ENABLE_CODEC_A  0x02
+#define SPI_ENABLE_CODEC_B  0x04
 
 /*!
  * USRP1 implementation guts:
@@ -132,6 +154,8 @@ private:
 
     void vandal_conquest_loop(void);
 
+    void set_reg(const std::pair<boost::uint8_t, boost::uint32_t> &reg);
+
     //handle the enables
     bool _rx_enabled, _tx_enabled;
     void enable_rx(bool enb){
@@ -141,6 +165,10 @@ private:
     void enable_tx(bool enb){
         _tx_enabled = enb;
         _fx2_ctrl->usrp_tx_enable(enb);
+        BOOST_FOREACH(const std::string &key, _dbc.keys())
+        {
+            _dbc[key].codec->enable_tx_digital(enb);
+        }
     }
 
     //conditionally disable and enable rx

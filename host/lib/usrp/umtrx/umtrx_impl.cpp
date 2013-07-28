@@ -31,17 +31,13 @@
 #include <uhd/utils/static.hpp>
 #include <uhd/utils/byteswap.hpp>
 #include <uhd/utils/safe_call.hpp>
-#include <uhd/utils/tasks.hpp>
 #include <boost/format.hpp>
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/bind.hpp>
-#include <boost/make_shared.hpp>
 #include <boost/assign/list_of.hpp>
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/asio.hpp> //used for htonl and ntohl
-#include "validate_subdev_spec.hpp"
-#include <uhd/usrp/dboard_iface.hpp>
 
 static int verbosity = 0;
 
@@ -49,6 +45,122 @@ using namespace uhd;
 using namespace uhd::usrp;
 using namespace uhd::transport;
 namespace asio = boost::asio;
+
+/***********************************************************************
+ * Discovery over the udp transport
+ **********************************************************************/
+
+static device_addrs_t usrp2_find_generic(const device_addr_t &hint_, const char * usrp_type, const usrp2_ctrl_id_t ctrl_id_request, const usrp2_ctrl_id_t ctrl_id_response) {
+    //handle the multi-device discovery
+    device_addrs_t hints = separate_device_addr(hint_);
+    if (hints.size() > 1){
+        device_addrs_t found_devices;
+        BOOST_FOREACH(const device_addr_t &hint_i, hints){
+            device_addrs_t found_devices_i = usrp2_find_generic(hint_i, usrp_type, ctrl_id_request, ctrl_id_response);
+            if (found_devices_i.size() != 1) throw uhd::value_error(str(boost::format(
+                "Could not resolve device hint \"%s\" to a single device."
+            ) % hint_i.to_string()));
+            found_devices.push_back(found_devices_i[0]);
+        }
+        return device_addrs_t(1, combine_device_addrs(found_devices));
+    }
+
+    //initialize the hint for a single device case
+    UHD_ASSERT_THROW(hints.size() <= 1);
+    hints.resize(1); //in case it was empty
+    device_addr_t hint = hints[0];
+    device_addrs_t usrp2_addrs;
+
+    //return an empty list of addresses when type is set to non-usrp2
+    if (hint.has_key("type") and hint["type"] != usrp_type) return usrp2_addrs;
+
+    //if no address was specified, send a broadcast on each interface
+    if (not hint.has_key("addr")){
+        BOOST_FOREACH(const if_addrs_t &if_addrs, get_if_addrs()){
+            //avoid the loopback device
+            if (if_addrs.inet == asio::ip::address_v4::loopback().to_string()) continue;
+
+            //create a new hint with this broadcast address
+            device_addr_t new_hint = hint;
+            new_hint["addr"] = if_addrs.bcast;
+
+            //call discover with the new hint and append results
+            device_addrs_t new_usrp2_addrs = usrp2_find_generic(new_hint, usrp_type, ctrl_id_request, ctrl_id_response);
+            usrp2_addrs.insert(usrp2_addrs.begin(),
+                new_usrp2_addrs.begin(), new_usrp2_addrs.end()
+            );
+        }
+        return usrp2_addrs;
+    }
+
+    //Create a UDP transport to communicate:
+    //Some devices will cause a throw when opened for a broadcast address.
+    //We print and recover so the caller can loop through all bcast addrs.
+    udp_simple::sptr udp_transport;
+    try{
+        udp_transport = udp_simple::make_broadcast(hint["addr"], BOOST_STRINGIZE(USRP2_UDP_CTRL_PORT));
+    }
+    catch(const std::exception &e){
+        UHD_MSG(error) << boost::format("Cannot open UDP transport on %s\n%s") % hint["addr"] % e.what() << std::endl;
+        return usrp2_addrs; //dont throw, but return empty address so caller can insert
+    }
+
+    //send a hello control packet
+    usrp2_ctrl_data_t ctrl_data_out = usrp2_ctrl_data_t();
+    ctrl_data_out.proto_ver = uhd::htonx<boost::uint32_t>(USRP2_FW_COMPAT_NUM);
+    ctrl_data_out.id = uhd::htonx<boost::uint32_t>(ctrl_id_request);
+    udp_transport->send(boost::asio::buffer(&ctrl_data_out, sizeof(ctrl_data_out)));
+
+    //loop and recieve until the timeout
+    boost::uint8_t usrp2_ctrl_data_in_mem[udp_simple::mtu]; //allocate max bytes for recv
+    const usrp2_ctrl_data_t *ctrl_data_in = reinterpret_cast<const usrp2_ctrl_data_t *>(usrp2_ctrl_data_in_mem);
+    while(true){
+        size_t len = udp_transport->recv(asio::buffer(usrp2_ctrl_data_in_mem));
+        if (len > offsetof(usrp2_ctrl_data_t, data) and ntohl(ctrl_data_in->id) == ctrl_id_response) {
+
+            //make a boost asio ipv4 with the raw addr in host byte order
+            device_addr_t new_addr;
+            new_addr["type"] = usrp_type;
+            //We used to get the address from the control packet.
+            //Now now uses the socket itself to yield the address.
+            //boost::asio::ip::address_v4 ip_addr(ntohl(ctrl_data_in->data.ip_addr));
+            //new_addr["addr"] = ip_addr.to_string();
+            new_addr["addr"] = udp_transport->get_recv_addr();
+
+            //Attempt to read the name from the EEPROM and perform filtering.
+            //This operation can throw due to compatibility mismatch.
+            try{
+                usrp2_iface::sptr iface = usrp2_iface::make(udp_simple::make_connected(
+                    new_addr["addr"], BOOST_STRINGIZE(USRP2_UDP_CTRL_PORT)
+                ));
+                if (iface->is_device_locked()) continue; //ignore locked devices
+                mboard_eeprom_t mb_eeprom = iface->mb_eeprom;
+                new_addr["name"] = mb_eeprom["name"];
+                new_addr["serial"] = mb_eeprom["serial"];
+            }
+            catch(const std::exception &){
+                //set these values as empty string so the device may still be found
+                //and the filter's below can still operate on the discovered device
+                new_addr["name"] = "";
+                new_addr["serial"] = "";
+            }
+
+            //filter the discovered device below by matching optional keys
+            if (
+                (not hint.has_key("name")   or hint["name"]   == new_addr["name"]) and
+                (not hint.has_key("serial") or hint["serial"] == new_addr["serial"])
+            ){
+                usrp2_addrs.push_back(new_addr);
+            }
+
+            //dont break here, it will exit the while loop
+            //just continue on to the next loop iteration
+        }
+        if (len == 0) break; //timeout
+    }
+
+    return usrp2_addrs;
+}
 
 /***********************************************************************
  * Make
@@ -66,9 +178,77 @@ UHD_STATIC_BLOCK(register_umtrx_device){
 }
 
 /***********************************************************************
+ * MTU Discovery
+ **********************************************************************/
+struct mtu_result_t{
+    size_t recv_mtu, send_mtu;
+};
+
+static mtu_result_t determine_mtu(const std::string &addr, const mtu_result_t &user_mtu){
+    udp_simple::sptr udp_sock = udp_simple::make_connected(
+        addr, BOOST_STRINGIZE(USRP2_UDP_CTRL_PORT)
+    );
+
+    //The FPGA offers 4K buffers, and the user may manually request this.
+    //However, multiple simultaneous receives (2DSP slave + 2DSP master),
+    //require that buffering to be used internally, and this is a safe setting.
+    std::vector<boost::uint8_t> buffer(std::max(user_mtu.recv_mtu, user_mtu.send_mtu));
+    usrp2_ctrl_data_t *ctrl_data = reinterpret_cast<usrp2_ctrl_data_t *>(&buffer.front());
+    static const double echo_timeout = 0.020; //20 ms
+
+    //test holler - check if its supported in this fw version
+    ctrl_data->id = htonl(USRP2_CTRL_ID_HOLLER_AT_ME_BRO);
+    ctrl_data->proto_ver = htonl(USRP2_FW_COMPAT_NUM);
+    ctrl_data->data.echo_args.len = htonl(sizeof(usrp2_ctrl_data_t));
+    udp_sock->send(boost::asio::buffer(buffer, sizeof(usrp2_ctrl_data_t)));
+    udp_sock->recv(boost::asio::buffer(buffer), echo_timeout);
+    if (ntohl(ctrl_data->id) != USRP2_CTRL_ID_HOLLER_BACK_DUDE)
+        throw uhd::not_implemented_error("holler protocol not implemented");
+
+    size_t min_recv_mtu = sizeof(usrp2_ctrl_data_t), max_recv_mtu = user_mtu.recv_mtu;
+    size_t min_send_mtu = sizeof(usrp2_ctrl_data_t), max_send_mtu = user_mtu.send_mtu;
+
+    while (min_recv_mtu < max_recv_mtu){
+
+        size_t test_mtu = (max_recv_mtu/2 + min_recv_mtu/2 + 3) & ~3;
+
+        ctrl_data->id = htonl(USRP2_CTRL_ID_HOLLER_AT_ME_BRO);
+        ctrl_data->proto_ver = htonl(USRP2_FW_COMPAT_NUM);
+        ctrl_data->data.echo_args.len = htonl(test_mtu);
+        udp_sock->send(boost::asio::buffer(buffer, sizeof(usrp2_ctrl_data_t)));
+
+        size_t len = udp_sock->recv(boost::asio::buffer(buffer), echo_timeout);
+
+        if (len >= test_mtu) min_recv_mtu = test_mtu;
+        else                 max_recv_mtu = test_mtu - 4;
+
+    }
+
+    while (min_send_mtu < max_send_mtu){
+
+        size_t test_mtu = (max_send_mtu/2 + min_send_mtu/2 + 3) & ~3;
+
+        ctrl_data->id = htonl(USRP2_CTRL_ID_HOLLER_AT_ME_BRO);
+        ctrl_data->proto_ver = htonl(USRP2_FW_COMPAT_NUM);
+        ctrl_data->data.echo_args.len = htonl(sizeof(usrp2_ctrl_data_t));
+        udp_sock->send(boost::asio::buffer(buffer, test_mtu));
+
+        size_t len = udp_sock->recv(boost::asio::buffer(buffer), echo_timeout);
+        if (len >= sizeof(usrp2_ctrl_data_t)) len = ntohl(ctrl_data->data.echo_args.len);
+
+        if (len >= test_mtu) min_send_mtu = test_mtu;
+        else                 max_send_mtu = test_mtu - 4;
+    }
+
+    mtu_result_t mtu;
+    mtu.recv_mtu = min_recv_mtu;
+    mtu.send_mtu = min_send_mtu;
+    return mtu;
+}
+
+/***********************************************************************
  * Helpers
  **********************************************************************/
-
 static zero_copy_if::sptr make_xport(
     const std::string &addr,
     const std::string &port,
@@ -108,6 +288,7 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
 {
     UHD_MSG(status) << "Opening a UmTRX device..." << std::endl;
     device_addr_t device_addr = _device_addr;
+
     //setup the dsp transport hints (default to a large recv buff)
     if (not device_addr.has_key("recv_buff_size")){
         #if defined(UHD_PLATFORM_MACOS) || defined(UHD_PLATFORM_BSD)
@@ -185,8 +366,9 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
                 "\nPlease update the firmware and FPGA images for your device.\n"
                 "See the application notes for UmTRX for instructions.\n"
                 "Expected FPGA compatibility number %d, but got %d:\n"
-                "The FPGA build is not compatible with the host code build."
-            ) % int(USRP2_FPGA_COMPAT_NUM) % fpga_major));
+                "The FPGA build is not compatible with the host code build.\n"
+                "%s\n"
+            ) % int(USRP2_FPGA_COMPAT_NUM) % fpga_major % _mbc[mb].iface->images_warn_help_message()));
         }
         _tree->create<std::string>(mb_path / "fpga_version").set(str(boost::format("%u.%u") % fpga_major % fpga_minor));
 
@@ -208,12 +390,33 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         _mbc[mb].tx_dsp_xports.push_back(make_xport(
             addr, BOOST_STRINGIZE(USRP2_UDP_TX_DSP0_PORT), device_args_i, "send"
         ));
+        UHD_LOG << "Making transport for Control..." << std::endl;
+        _mbc[mb].fifo_ctrl_xport = make_xport(
+            addr, BOOST_STRINGIZE(USRP2_UDP_FIFO_CRTL_PORT), device_addr_t(), ""
+        );
         UHD_LOG << "Making transport for TX DSP1..." << std::endl;
         _mbc[mb].tx_dsp_xports.push_back(make_xport(
             addr, BOOST_STRINGIZE(USRP2_UDP_TX_DSP1_PORT), device_args_i, "send"
         ));
-        //set the filter on the router to take dsp data from these ports
-        _mbc[mb].iface->poke32(U2_REG_ROUTER_CTRL_PORTS, ((uint32_t)USRP2_UDP_TX_DSP1_PORT)<<16 | USRP2_UDP_TX_DSP0_PORT);
+        //set the filter on the router to take dsp data from this port
+        _mbc[mb].iface->poke32(U2_REG_ROUTER_CTRL_PORTS, (USRP2_UDP_FIFO_CRTL_PORT << 16) | USRP2_UDP_TX_DSP0_PORT);
+
+        //create the fifo control interface for high speed register access
+        _mbc[mb].fifo_ctrl = usrp2_fifo_ctrl::make(_mbc[mb].fifo_ctrl_xport);
+        switch(_mbc[mb].iface->get_rev()){
+        case usrp2_iface::USRP_N200:
+        case usrp2_iface::USRP_N210:
+        case usrp2_iface::USRP_N200_R4:
+        case usrp2_iface::USRP_N210_R4:
+        case usrp2_iface::UMTRX_REV0:
+            _mbc[mb].wbiface = _mbc[mb].fifo_ctrl;
+            _mbc[mb].spiface = _mbc[mb].fifo_ctrl;
+            break;
+        default:
+            _mbc[mb].wbiface = _mbc[mb].iface;
+            _mbc[mb].spiface = _mbc[mb].iface;
+            break;
+        }
 
         ////////////////////////////////////////////////////////////////
         // setup the mboard eeprom
@@ -286,16 +489,16 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         // create frontend control objects
         ////////////////////////////////////////////////////////////////
         _mbc[mb].rx_fes.push_back(rx_frontend_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_RX_FRONT0)
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_RX_FRONT0)
         ));
         _mbc[mb].tx_fes.push_back(tx_frontend_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_TX_FRONT0)
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TX_FRONT0)
         ));
         _mbc[mb].rx_fes.push_back(rx_frontend_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_RX_FRONT1)
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_RX_FRONT1)
         ));
         _mbc[mb].tx_fes.push_back(tx_frontend_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_TX_FRONT1)
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TX_FRONT1)
         ));
 
         _tree->create<subdev_spec_t>(mb_path / "rx_subdev_spec")
@@ -309,19 +512,19 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
             const rx_frontend_core_200::sptr rx_fe = (db=="A")?_mbc[mb].rx_fes[0]:_mbc[mb].rx_fes[1];
             const tx_frontend_core_200::sptr tx_fe = (db=="A")?_mbc[mb].tx_fes[0]:_mbc[mb].tx_fes[1];
 
-            _tree->create<std::complex<double> >(rx_fe_path / "dc_offset" / "value")
+        _tree->create<std::complex<double> >(rx_fe_path / "dc_offset" / "value")
                 .coerce(boost::bind(&rx_frontend_core_200::set_dc_offset, rx_fe, _1))
-                .set(std::complex<double>(0.0, 0.0));
-            _tree->create<bool>(rx_fe_path / "dc_offset" / "enable")
+            .set(std::complex<double>(0.0, 0.0));
+        _tree->create<bool>(rx_fe_path / "dc_offset" / "enable")
                 .subscribe(boost::bind(&rx_frontend_core_200::set_dc_offset_auto, rx_fe, _1))
-                .set(true);
-            _tree->create<std::complex<double> >(rx_fe_path / "iq_balance" / "value")
+            .set(true);
+        _tree->create<std::complex<double> >(rx_fe_path / "iq_balance" / "value")
                 .subscribe(boost::bind(&rx_frontend_core_200::set_iq_balance, rx_fe, _1))
                 .set(std::polar<double>(1.0, 0.0));
-            _tree->create<std::complex<double> >(tx_fe_path / "dc_offset" / "value")
+        _tree->create<std::complex<double> >(tx_fe_path / "dc_offset" / "value")
                 .coerce(boost::bind(&tx_frontend_core_200::set_dc_offset, tx_fe, _1))
-                .set(std::complex<double>(0.0, 0.0));
-            _tree->create<std::complex<double> >(tx_fe_path / "iq_balance" / "value")
+            .set(std::complex<double>(0.0, 0.0));
+        _tree->create<std::complex<double> >(tx_fe_path / "iq_balance" / "value")
                 .subscribe(boost::bind(&tx_frontend_core_200::set_iq_balance, tx_fe, _1))
                 .set(std::polar<double>(1.0, 0.0));
         }
@@ -330,10 +533,10 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         // create rx dsp control objects
         ////////////////////////////////////////////////////////////////
         _mbc[mb].rx_dsps.push_back(rx_dsp_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_RX_DSP0), U2_REG_SR_ADDR(SR_RX_CTRL0), USRP2_RX_SID_BASE + 0, true
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_RX_DSP0), U2_REG_SR_ADDR(SR_RX_CTRL0), USRP2_RX_SID_BASE + 0, true
         ));
         _mbc[mb].rx_dsps.push_back(rx_dsp_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_RX_DSP1), U2_REG_SR_ADDR(SR_RX_CTRL1), USRP2_RX_SID_BASE + 1, true
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_RX_DSP1), U2_REG_SR_ADDR(SR_RX_CTRL1), USRP2_RX_SID_BASE + 1, true
         ));
         for (size_t dspno = 0; dspno < _mbc[mb].rx_dsps.size(); dspno++){
             _mbc[mb].rx_dsps[dspno]->set_link_rate(USRP2_LINK_RATE_BPS);
@@ -358,20 +561,20 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         // create tx dsp control objects
         ////////////////////////////////////////////////////////////////
         _mbc[mb].tx_dsps.push_back(tx_dsp_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_TX_DSP0), U2_REG_SR_ADDR(SR_TX_CTRL0), USRP2_TX_ASYNC_SID_BASE+0
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TX_DSP0), U2_REG_SR_ADDR(SR_TX_CTRL0), USRP2_TX_ASYNC_SID_BASE+0
         ));
         _mbc[mb].tx_dsps.push_back(tx_dsp_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_TX_DSP1), U2_REG_SR_ADDR(SR_TX_CTRL1), USRP2_TX_ASYNC_SID_BASE+1
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TX_DSP1), U2_REG_SR_ADDR(SR_TX_CTRL1), USRP2_TX_ASYNC_SID_BASE+1
         ));
         for (size_t dspno = 0; dspno < _mbc[mb].tx_dsps.size(); dspno++){
             _mbc[mb].tx_dsps[dspno]->set_link_rate(USRP2_LINK_RATE_BPS);
-            _tree->access<double>(mb_path / "tick_rate")
+        _tree->access<double>(mb_path / "tick_rate")
                 .subscribe(boost::bind(&tx_dsp_core_200::set_tick_rate, _mbc[mb].tx_dsps[dspno], _1));
             fs_path tx_dsp_path = mb_path / str(boost::format("tx_dsps/%u") % dspno);
             _tree->create<meta_range_t>(tx_dsp_path / "rate/range")
                 .publish(boost::bind(&tx_dsp_core_200::get_host_rates, _mbc[mb].tx_dsps[dspno]));
             _tree->create<double>(tx_dsp_path / "rate/value")
-                .set(1e6) //some default
+            .set(1e6) //some default
                 .coerce(boost::bind(&tx_dsp_core_200::set_host_rate, _mbc[mb].tx_dsps[dspno], _1))
                 .subscribe(boost::bind(&umtrx_impl::update_tx_samp_rate, this, mb, dspno, _1));
             _tree->create<double>(tx_dsp_path / "freq/value")
@@ -397,12 +600,12 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         // create time control objects
         ////////////////////////////////////////////////////////////////
         time64_core_200::readback_bases_type time64_rb_bases;
-        time64_rb_bases.rb_secs_now = U2_REG_TIME64_SECS_RB_IMM;
-        time64_rb_bases.rb_ticks_now = U2_REG_TIME64_TICKS_RB_IMM;
-        time64_rb_bases.rb_secs_pps = U2_REG_TIME64_SECS_RB_PPS;
-        time64_rb_bases.rb_ticks_pps = U2_REG_TIME64_TICKS_RB_PPS;
+        time64_rb_bases.rb_hi_now = U2_REG_TIME64_HI_RB_IMM;
+        time64_rb_bases.rb_lo_now = U2_REG_TIME64_LO_RB_IMM;
+        time64_rb_bases.rb_hi_pps = U2_REG_TIME64_HI_RB_PPS;
+        time64_rb_bases.rb_lo_pps = U2_REG_TIME64_LO_RB_PPS;
         _mbc[mb].time64 = time64_core_200::make(
-            _mbc[mb].iface, U2_REG_SR_ADDR(SR_TIME64), time64_rb_bases, mimo_clock_sync_delay_cycles
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TIME64), time64_rb_bases, mimo_clock_sync_delay_cycles
         );
         _tree->access<double>(mb_path / "tick_rate")
             .subscribe(boost::bind(&time64_core_200::set_tick_rate, _mbc[mb].time64, _1));
@@ -418,11 +621,31 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         _tree->create<std::vector<std::string> >(mb_path / "time_source/options")
             .publish(boost::bind(&time64_core_200::get_time_sources, _mbc[mb].time64));
         //setup reference source props
-      _tree->create<std::string>(mb_path / "clock_source/value");
-//            .subscribe(boost::bind(&umtrx_impl::update_clock_source, this, mb, _1));
-
-        static const std::vector<std::string> clock_sources = boost::assign::list_of("internal")("external")("mimo");
+        _tree->create<std::string>(mb_path / "clock_source/value");
+        //    .subscribe(boost::bind(&usrp2_impl::update_clock_source, this, mb, _1));
+        std::vector<std::string> clock_sources = boost::assign::list_of("internal")("external")("mimo");
+        if (_mbc[mb].gps and _mbc[mb].gps->gps_detected()) clock_sources.push_back("gpsdo");
         _tree->create<std::vector<std::string> >(mb_path / "clock_source/options").set(clock_sources);
+        //plug timed commands into tree here
+        switch(_mbc[mb].iface->get_rev()){
+        case usrp2_iface::USRP_N200:
+        case usrp2_iface::USRP_N210:
+        case usrp2_iface::USRP_N200_R4:
+        case usrp2_iface::USRP_N210_R4:
+        case usrp2_iface::UMTRX_REV0:
+            _tree->create<time_spec_t>(mb_path / "time/cmd")
+                .subscribe(boost::bind(&usrp2_fifo_ctrl::set_time, _mbc[mb].fifo_ctrl, _1));
+        default: break; //otherwise, do not register
+        }
+        _tree->access<double>(mb_path / "tick_rate")
+            .subscribe(boost::bind(&usrp2_fifo_ctrl::set_tick_rate, _mbc[mb].fifo_ctrl, _1));
+
+        ////////////////////////////////////////////////////////////////////
+        // create user-defined control objects
+        ////////////////////////////////////////////////////////////////////
+        _mbc[mb].user = user_settings_core_200::make(_mbc[mb].wbiface, U2_REG_SR_ADDR(SR_USER_REGS));
+        _tree->create<user_settings_core_200::user_reg_t>(mb_path / "user/regs")
+            .subscribe(boost::bind(&user_settings_core_200::set_reg, _mbc[mb].user, _1));
 
         ////////////////////////////////////////////////////////////////
         // create dboard control objects
@@ -443,12 +666,15 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
             tx_db_eeprom.serial = _mbc[mb].iface->mb_eeprom["serial"] + "." + board;
 
             //create dboard interface
-            _mbc[mb].dbc[board].dboard_iface = make_umtrx_dboard_iface(_mbc[mb].iface, board,
-                                                                       2*get_master_clock_rate()); // ref_clk = 2 * sample rate
+            _mbc[mb].dbc[board].dboard_iface = make_umtrx_dboard_iface(
+_mbc[mb].iface/*i2c*/,
+ _mbc[mb].spiface,
+ board,
+ 2*get_master_clock_rate()); // ref_clk = 2 * sample rate
             _mbc[mb].dbc[board].dboard_manager = dboard_manager::make(
-                rx_db_eeprom.id, tx_db_eeprom.id, gdb_eeprom.id,
+            rx_db_eeprom.id, tx_db_eeprom.id, gdb_eeprom.id,
                 _mbc[mb].dbc[board].dboard_iface, _tree->subtree(mb_path / "dboards" / board)
-                );
+        );
 
             //create the properties and register subscribers
             _tree->create<dboard_eeprom_t>(mb_path / "dboards" / board / "rx_eeprom")
@@ -462,17 +688,17 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
             
             _tree->create<dboard_iface::sptr>(mb_path / "dboards" / board / "iface").set(_mbc[mb].dbc[board].dboard_iface);
 
-            //bind frontend corrections to the dboard freq props
+        //bind frontend corrections to the dboard freq props
             const fs_path db_tx_fe_path = mb_path / "dboards" / board / "tx_frontends";
-            BOOST_FOREACH(const std::string &name, _tree->list(db_tx_fe_path)){
-                _tree->access<double>(db_tx_fe_path / name / "freq" / "value")
+        BOOST_FOREACH(const std::string &name, _tree->list(db_tx_fe_path)){
+            _tree->access<double>(db_tx_fe_path / name / "freq" / "value")
                     .subscribe(boost::bind(&umtrx_impl::set_tx_fe_corrections, this, mb, board, _1));
-            }
+        }
             const fs_path db_rx_fe_path = mb_path / "dboards" / board / "rx_frontends";
-            BOOST_FOREACH(const std::string &name, _tree->list(db_rx_fe_path)){
-                _tree->access<double>(db_rx_fe_path / name / "freq" / "value")
+        BOOST_FOREACH(const std::string &name, _tree->list(db_rx_fe_path)){
+            _tree->access<double>(db_rx_fe_path / name / "freq" / "value")
                     .subscribe(boost::bind(&umtrx_impl::set_rx_fe_corrections, this, mb, board, _1));
-            }
+        }
 
             //set Tx DC calibration values, which are read from mboard EEPROM
             if (_mbc[mb].iface->mb_eeprom.has_key("tx-vga1-dc-i") and not _mbc[mb].iface->mb_eeprom["tx-vga1-dc-i"].empty()) {
@@ -505,20 +731,30 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
     BOOST_FOREACH(const std::string &mb, _mbc.keys()){
         fs_path root = "/mboards/" + mb;
 
+        //reset cordic rates and their properties to zero
+        BOOST_FOREACH(const std::string &name, _tree->list(root / "rx_dsps")){
+            _tree->access<double>(root / "rx_dsps" / name / "freq" / "value").set(0.0);
+        }
+        BOOST_FOREACH(const std::string &name, _tree->list(root / "tx_dsps")){
+            _tree->access<double>(root / "tx_dsps" / name / "freq" / "value").set(0.0);
+        }
+
         _tree->access<subdev_spec_t>(root / "rx_subdev_spec").set(subdev_spec_t("A:" + _tree->list(root / "dboards/A/rx_frontends").at(0)));
         _tree->access<subdev_spec_t>(root / "tx_subdev_spec").set(subdev_spec_t("A:" + _tree->list(root / "dboards/A/tx_frontends").at(0)));
         _tree->access<std::string>(root / "clock_source/value").set("internal");
         _tree->access<std::string>(root / "time_source/value").set("none");
 
         //GPS installed: use external ref, time, and init time spec
-        if (_mbc[mb].gps.get() and _mbc[mb].gps->gps_detected()){
+        if (_mbc[mb].gps and _mbc[mb].gps->gps_detected()){
+            _mbc[mb].time64->enable_gpsdo();
             UHD_MSG(status) << "Setting references to the internal GPSDO" << std::endl;
-            _tree->access<std::string>(root / "time_source/value").set("external");
-            _tree->access<std::string>(root / "clock_source/value").set("external");
+            _tree->access<std::string>(root / "time_source/value").set("gpsdo");
+            _tree->access<std::string>(root / "clock_source/value").set("gpsdo");
             UHD_MSG(status) << "Initializing time to the internal GPSDO" << std::endl;
             _mbc[mb].time64->set_time_next_pps(time_spec_t(time_t(_mbc[mb].gps->get_sensor("gps_time").to_int()+1)));
         }
     }
+
 }
 
 umtrx_impl::~umtrx_impl(void){UHD_SAFE_CALL(
@@ -529,7 +765,7 @@ umtrx_impl::~umtrx_impl(void){UHD_SAFE_CALL(
 )}
 
 void umtrx_impl::set_mb_eeprom(const std::string &mb, const uhd::usrp::mboard_eeprom_t &mb_eeprom){
-    mb_eeprom.commit(*(_mbc[mb].iface), mboard_eeprom_t::MAP_UMTRX);
+    mb_eeprom.commit(*(_mbc[mb].iface), "UMTRX");
 }
 
 void umtrx_impl::set_rx_fe_corrections(const std::string &mb, const std::string &board, const double lo_freq){

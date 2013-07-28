@@ -1,5 +1,5 @@
 #
-# Copyright 2011 Ettus Research LLC
+# Copyright 2011-2012 Ettus Research LLC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,10 +24,12 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 LIBUHD_APPEND_SOURCES(
     ${CMAKE_CURRENT_SOURCE_DIR}/gpio_core_200.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/i2c_core_100.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/i2c_core_200.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/spi_core_100.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/time64_core_200.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rx_dsp_core_200.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tx_dsp_core_200.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rx_frontend_core_200.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tx_frontend_core_200.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/user_settings_core_200.cpp
 )

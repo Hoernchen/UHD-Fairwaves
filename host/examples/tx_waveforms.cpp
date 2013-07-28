@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -24,6 +24,7 @@
 #include <boost/math/special_functions/round.hpp>
 #include <boost/foreach.hpp>
 #include <boost/format.hpp>
+#include <boost/thread.hpp>
 #include <iostream>
 #include <complex>
 #include <csignal>
@@ -90,7 +91,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::set_thread_priority_safe();
 
     //variables to be set by po
-    std::string args, wave_type, ant, subdev, ref;
+    std::string args, wave_type, ant, subdev, ref, otw;
     size_t spb;
     double rate, freq, gain, wave_freq, bw;
     float ampl;
@@ -111,6 +112,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         ("wave-type", po::value<std::string>(&wave_type)->default_value("CONST"), "waveform type (CONST, SQUARE, RAMP, SINE)")
         ("wave-freq", po::value<double>(&wave_freq)->default_value(0), "waveform frequency in Hz")
         ("ref", po::value<std::string>(&ref)->default_value("internal"), "clock reference (internal, external, mimo)")
+        ("otw", po::value<std::string>(&otw)->default_value("sc16"), "specify the over-the-wire sample mode")
     ;
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -173,6 +175,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         if (vm.count("ant")) usrp->set_tx_antenna(ant, chan);
     }
 
+    boost::this_thread::sleep(boost::posix_time::seconds(1)); //allow for some setup time
+
     //for the const wave, set the wave freq for small samples per period
     if (wave_freq == 0 and wave_type == "CONST"){
         wave_freq = usrp->get_tx_rate()/2;
@@ -193,7 +197,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     //create a transmit streamer
     //linearly map channels (index0 = channel0, index1 = channel1, ...)
-    uhd::stream_args_t stream_args("fc32");
+    uhd::stream_args_t stream_args("fc32", otw);
     for (size_t chan = 0; chan < usrp->get_tx_num_channels(); chan++)
         stream_args.channels.push_back(chan); //linear mapping
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);

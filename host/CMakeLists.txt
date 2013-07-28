@@ -1,5 +1,5 @@
 #
-# Copyright 2010-2011 Ettus Research LLC
+# Copyright 2010-2012 Ettus Research LLC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -46,6 +46,7 @@ IF(NOT DEFINED PKG_LIB_DIR)
     SET(PKG_LIB_DIR ${PKG_DATA_DIR})
 ENDIF()
 SET(PKG_DOC_DIR share/doc/uhd)
+SET(PKG_MAN_DIR share/man/man1)
 
 ########################################################################
 # Local Include Dir
@@ -70,6 +71,9 @@ IF(NOT CMAKE_BUILD_TYPE)
 ENDIF(NOT CMAKE_BUILD_TYPE)
 SET(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "")
 
+#force UHD_RELEASE_MODE to be a string for cmake-gui
+SET(UHD_RELEASE_MODE "${UHD_RELEASE_MODE}" CACHE STRING "UHD Release Mode")
+
 IF(CMAKE_COMPILER_IS_GNUCXX)
     ADD_DEFINITIONS(-Wall)
     ADD_DEFINITIONS(-Wextra)
@@ -80,6 +84,7 @@ IF(CMAKE_COMPILER_IS_GNUCXX)
     IF(NOT WIN32)
         #only export symbols that are declared to be part of the uhd api (non dll platforms)
         UHD_ADD_OPTIONAL_CXX_COMPILER_FLAG(-fvisibility=hidden HAVE_VISIBILITY_HIDDEN)
+        UHD_ADD_OPTIONAL_CXX_COMPILER_FLAG(-fvisibility-inlines-hidden HAVE_VISIBILITY_INLINES_HIDDEN)
     ENDIF(NOT WIN32)
 ENDIF(CMAKE_COMPILER_IS_GNUCXX)
 
@@ -119,9 +124,9 @@ SET(BOOST_REQUIRED_COMPONENTS
     unit_test_framework
 )
 
-IF(UNIX AND EXISTS "/usr/lib64")
+IF(UNIX AND NOT BOOST_ROOT AND EXISTS "/usr/lib64")
     LIST(APPEND BOOST_LIBRARYDIR "/usr/lib64") #fedora 64-bit fix
-ENDIF(UNIX AND EXISTS "/usr/lib64")
+ENDIF(UNIX AND NOT BOOST_ROOT AND EXISTS "/usr/lib64")
 
 IF(MSVC)
     SET(BOOST_ALL_DYN_LINK "${BOOST_ALL_DYN_LINK}" CACHE BOOL "boost enable dynamic linking")
@@ -191,6 +196,13 @@ INSTALL(FILES
 )
 
 ########################################################################
+# Images download directory for utils/uhd_images_downloader.py
+########################################################################
+
+SET(UHD_IMAGES_MD5SUM "f5acbc2f795fa1acfa9ad9986d59ed3b")
+SET(UHD_IMAGES_DOWNLOAD_SRC "http://files.ettus.com/binaries/maint_images/archive/uhd-images_003.005.003-release.zip")
+
+########################################################################
 # Register top level components
 ########################################################################
 LIBUHD_REGISTER_COMPONENT("LibUHD" ENABLE_LIBUHD ON "Boost_FOUND;HAVE_PYTHON_PLAT_MIN_VERSION;HAVE_PYTHON_MODULE_CHEETAH" OFF)
@@ -220,8 +232,6 @@ ENDIF(ENABLE_TESTS)
 IF(ENABLE_UTILS)
     ADD_SUBDIRECTORY(utils)
 ENDIF(ENABLE_UTILS)
-
-ADD_SUBDIRECTORY(usrp_e_utils)
 
 ########################################################################
 # Create Pkg Config File
@@ -272,5 +282,6 @@ ENDIF(DEFINED UHD_IMAGES_DIR AND EXISTS "${UHD_IMAGES_DIR}")
 # Print Summary
 ########################################################################
 UHD_PRINT_COMPONENT_SUMMARY()
-MESSAGE(STATUS "Building version: ${CPACK_PACKAGE_VERSION}-${UHD_BUILD_INFO}")
+MESSAGE(STATUS "Building version: ${UHD_VERSION}")
 MESSAGE(STATUS "Using install prefix: ${CMAKE_INSTALL_PREFIX}")
+MESSAGE(STATUS "Compatible images can be downloaded from: ${UHD_IMAGES_DOWNLOAD_SRC}")

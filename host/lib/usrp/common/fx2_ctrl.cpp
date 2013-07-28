@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -16,7 +16,6 @@
 //
 
 #include "fx2_ctrl.hpp"
-#include "usrp_commands.h"
 #include <uhd/utils/msg.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/transport/usb_control.hpp>
@@ -137,6 +136,15 @@ public:
     fx2_ctrl_impl(uhd::transport::usb_control::sptr ctrl_transport)
     {
         _ctrl_transport = ctrl_transport;
+    }
+
+    void usrp_fx2_reset(void){
+        unsigned char reset_y = 1;
+        unsigned char reset_n = 0;
+        usrp_control_write(FX2_FIRMWARE_LOAD, 0xe600, 0, &reset_y, 1);
+        usrp_control_write(FX2_FIRMWARE_LOAD, 0xe600, 0, &reset_n, 1);
+        //wait for things to settle
+        boost::this_thread::sleep(boost::posix_time::milliseconds(2000));
     }
 
     void usrp_load_firmware(std::string filestring, bool force)
@@ -402,6 +410,15 @@ public:
         return usrp_control_write(request, value, index, 0, 0);
     }
 
+    byte_vector_t read_eeprom(
+        boost::uint8_t addr,
+        boost::uint8_t offset,
+        size_t num_bytes
+    ){
+        this->write_i2c(addr, byte_vector_t(1, offset));
+        return this->read_i2c(addr, num_bytes);
+    }
+
     int usrp_i2c_write(boost::uint16_t i2c_addr, unsigned char *buf, boost::uint16_t len)
     {
         return usrp_control_write(VRQ_I2C_WRITE, i2c_addr, 0, buf, len);
@@ -419,12 +436,7 @@ public:
     {
         UHD_ASSERT_THROW(bytes.size() < max_i2c_data_bytes);
 
-        unsigned char buff[max_i2c_data_bytes];
-        std::copy(bytes.begin(), bytes.end(), buff);
-
-        int ret = this->usrp_i2c_write(addr & 0xff,
-                                             buff,
-                                             bytes.size());
+        int ret = this->usrp_i2c_write(addr, (unsigned char *)&bytes.front(), bytes.size());
 
         if (iface_debug && (ret < 0))
             uhd::runtime_error("USRP: failed i2c write");
@@ -434,19 +446,13 @@ public:
     {
       UHD_ASSERT_THROW(num_bytes < max_i2c_data_bytes);
 
-      unsigned char buff[max_i2c_data_bytes];
-      int ret = this->usrp_i2c_read(addr & 0xff,
-                                            buff,
-                                            num_bytes);
+      byte_vector_t bytes(num_bytes);
+      int ret = this->usrp_i2c_read(addr, (unsigned char *)&bytes.front(), num_bytes);
 
       if (iface_debug && ((ret < 0) || (unsigned)ret < (num_bytes)))
           uhd::runtime_error("USRP: failed i2c read");
 
-      byte_vector_t out_bytes;
-      for (size_t i = 0; i < num_bytes; i++)
-          out_bytes.push_back(buff[i]);
-
-      return out_bytes;
+      return bytes;
     }
 
 

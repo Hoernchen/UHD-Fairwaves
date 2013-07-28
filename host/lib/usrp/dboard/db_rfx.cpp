@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -111,21 +111,9 @@ private:
     }
 
     /*!
-     * Read the RSSI from the aux adc
-     * \return the rssi sensor in dBm
+     * Removed incorrect/confusing RSSI calculation
+     * Limited dynamic range of sensor makes this less useful
      */
-    sensor_value_t get_rssi(void){
-        //RSSI from VAGC vs RF Power, Fig 34, pg 13
-        double max_power = -3.0;
-
-        //constants for the rssi calculation
-        static const double min_v = 0.35, max_v = 1.0;
-        static const double rssi_dyn_range = 60;
-        //calculate the rssi from the voltage
-        double voltage = this->get_iface()->read_aux_adc(dboard_iface::UNIT_RX, dboard_iface::AUX_ADC_B);
-        const double rssi = max_power - rssi_dyn_range*(voltage - min_v)/(max_v - min_v);
-        return sensor_value_t("RSSI", rssi, "dBm");
-    }
 };
 
 /***********************************************************************
@@ -186,11 +174,16 @@ rfx_xcvr::rfx_xcvr(
     ////////////////////////////////////////////////////////////////////
     // Register RX properties
     ////////////////////////////////////////////////////////////////////
-    this->get_rx_subtree()->create<std::string>("name").set("RFX RX");
+    if(get_rx_id() == 0x0024) this->get_rx_subtree()->create<std::string>("name").set("RFX400 RX");
+    else if(get_rx_id() == 0x0025) this->get_rx_subtree()->create<std::string>("name").set("RFX900 RX");
+    else if(get_rx_id() == 0x0034) this->get_rx_subtree()->create<std::string>("name").set("RFX1800 RX");
+    else if(get_rx_id() == 0x0026) this->get_rx_subtree()->create<std::string>("name").set("RFX1200 RX");
+    else if(get_rx_id() == 0x002c) this->get_rx_subtree()->create<std::string>("name").set("RFX2200 RX");
+    else if(get_rx_id() == 0x0027) this->get_rx_subtree()->create<std::string>("name").set("RFX2400 RX");
+    else this->get_rx_subtree()->create<std::string>("name").set("RFX RX");
+
     this->get_rx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .publish(boost::bind(&rfx_xcvr::get_locked, this, dboard_iface::UNIT_RX));
-    this->get_rx_subtree()->create<sensor_value_t>("sensors/rssi")
-        .publish(boost::bind(&rfx_xcvr::get_rssi, this));
     BOOST_FOREACH(const std::string &name, _rx_gain_ranges.keys()){
         this->get_rx_subtree()->create<double>("gains/"+name+"/value")
             .coerce(boost::bind(&rfx_xcvr::set_rx_gain, this, _1, name))
@@ -217,7 +210,14 @@ rfx_xcvr::rfx_xcvr(
     ////////////////////////////////////////////////////////////////////
     // Register TX properties
     ////////////////////////////////////////////////////////////////////
-    this->get_tx_subtree()->create<std::string>("name").set("RFX TX");
+    if(get_tx_id() == 0x0028) this->get_tx_subtree()->create<std::string>("name").set("RFX400 TX");
+    else if(get_tx_id() == 0x0029) this->get_tx_subtree()->create<std::string>("name").set("RFX900 TX");
+    else if(get_tx_id() == 0x0035) this->get_tx_subtree()->create<std::string>("name").set("RFX1800 TX");
+    else if(get_tx_id() == 0x002a) this->get_tx_subtree()->create<std::string>("name").set("RFX1200 TX");
+    else if(get_tx_id() == 0x002d) this->get_tx_subtree()->create<std::string>("name").set("RFX2200 TX");
+    else if(get_tx_id() == 0x002b) this->get_tx_subtree()->create<std::string>("name").set("RFX2400 TX");
+    else this->get_tx_subtree()->create<std::string>("name").set("RFX TX");
+
     this->get_tx_subtree()->create<sensor_value_t>("sensors/lo_locked")
         .publish(boost::bind(&rfx_xcvr::get_locked, this, dboard_iface::UNIT_TX));
     this->get_tx_subtree()->create<int>("gains"); //phony property so this dir exists
@@ -272,7 +272,7 @@ void rfx_xcvr::set_rx_ant(const std::string &ant){
 
     //set the rx atr regs that change with antenna setting
     if (ant == "CAL") {
-        this->get_iface()->set_atr_reg(dboard_iface::UNIT_RX, dboard_iface::ATR_REG_TX_ONLY,     _power_up | ANT_TXRX  | MIXER_DIS);
+        this->get_iface()->set_atr_reg(dboard_iface::UNIT_RX, dboard_iface::ATR_REG_TX_ONLY,     _power_up | ANT_TXRX  | MIXER_ENB);
         this->get_iface()->set_atr_reg(dboard_iface::UNIT_RX, dboard_iface::ATR_REG_FULL_DUPLEX, _power_up | ANT_TXRX  | MIXER_ENB);
         this->get_iface()->set_atr_reg(dboard_iface::UNIT_RX, dboard_iface::ATR_REG_RX_ONLY,     _power_up | MIXER_ENB | ANT_TXRX );
     } 
@@ -372,7 +372,7 @@ double rfx_xcvr::set_lo_freq(
      * The goal here to to loop though possible R dividers,
      * band select clock dividers, and prescaler values.
      * Calculate the A and B counters for each set of values.
-     * The loop exists when it meets all of the constraints.
+     * The loop exits when it meets all of the constraints.
      * The resulting loop values are loaded into the registers.
      *
      * fvco = [P*B + A] * fref/R

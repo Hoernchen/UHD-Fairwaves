@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <iso646.h>
 
 /*!
  * LMS6002D control class

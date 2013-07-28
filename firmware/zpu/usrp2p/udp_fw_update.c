@@ -1,6 +1,5 @@
-/* -*- c++ -*- */
 /*
- * Copyright 2010 Ettus Research LLC
+ * Copyright 2010-2012 Ettus Research LLC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +18,7 @@
 //Routines to handle updating the SPI Flash firmware via UDP
 
 #include <net_common.h>
+#include "memory_map.h"
 #include "usrp2/fw_common.h"
 #include "spi.h"
 #include "spi_flash.h"
@@ -76,14 +76,9 @@ void handle_udp_fw_update_packet(struct socket_address src, struct socket_addres
     update_data_out.id = USRP2_FW_UPDATE_ID_OHAI_OMG;
     memcpy(&update_data_out.data.ip_addr, (void *)get_ip_addr(), sizeof(struct ip_addr));
     //this is to stop streaming for the folks who think updating while streaming is a good idea
-    sr_rx_ctrl0->cmd = 1 << 31 | 1 << 28; //no samples now
-    sr_rx_ctrl0->time_secs = 0;
-    sr_rx_ctrl0->time_ticks = 0; //latch the command
-    sr_rx_ctrl1->cmd = 1 << 31 | 1 << 28; //no samples now
-    sr_rx_ctrl1->time_secs = 0;
-    sr_rx_ctrl1->time_ticks = 0; //latch the command
-    sr_tx_ctrl0->cyc_per_up = 0;
-    sr_tx_ctrl1->cyc_per_up = 0;
+    sr_rx_ctrl0->clear = 1;
+    sr_rx_ctrl1->clear = 1;
+    sr_tx_ctrl->cyc_per_up = 0;
     break;
 
   case USRP2_FW_UPDATE_ID_WATS_TEH_FLASH_INFO_LOL: //query sector size, memory size so the host can mind the boundaries

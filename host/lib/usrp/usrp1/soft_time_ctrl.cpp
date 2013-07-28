@@ -1,5 +1,5 @@
 //
-// Copyright 2011 Ettus Research LLC
+// Copyright 2011-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -39,8 +39,8 @@ public:
         _nsamps_remaining(0),
         _stream_mode(stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS),
         _cmd_queue(2),
-        _async_msg_queue(100),
-        _inline_msg_queue(100),
+        _async_msg_queue(1000),
+        _inline_msg_queue(1000),
         _stream_on_off(stream_on_off)
     {
         //synchronously spawn a new thread
@@ -205,6 +205,10 @@ public:
 
     bounded_buffer<rx_metadata_t> &get_inline_queue(void){
         return _inline_msg_queue;
+    }
+
+    void stop(void){
+        _recv_cmd_task.reset();
     }
 
 private:

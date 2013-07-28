@@ -42,12 +42,12 @@ USRP2_FW_PROTO_VERSION = 7 #should be unused after r6
 #from bootloader_utils.h
 
 class USRP_CONST:
-    FPGA_IMAGE_SIZE_BYTES = 1572864
-    FW_IMAGE_SIZE_BYTES = 31744
-    SAFE_FPGA_IMAGE_LOCATION_ADDR = 0x00000000
-    SAFE_FW_IMAGE_LOCATION_ADDR = 0x003F0000
-    PROD_FPGA_IMAGE_LOCATION_ADDR = 0x00180000
-    PROD_FW_IMAGE_LOCATION_ADDR = 0x00300000
+FPGA_IMAGE_SIZE_BYTES = 1572864
+FW_IMAGE_SIZE_BYTES = 31744
+SAFE_FPGA_IMAGE_LOCATION_ADDR = 0x00000000
+SAFE_FW_IMAGE_LOCATION_ADDR = 0x003F0000
+PROD_FPGA_IMAGE_LOCATION_ADDR = 0x00180000
+PROD_FW_IMAGE_LOCATION_ADDR = 0x00300000
 
 class UMTRX_CONST:
     FPGA_IMAGE_SIZE_BYTES = 2464964
@@ -144,7 +144,7 @@ def command(*args):
         stderr=subprocess.STDOUT,
     )
     ret = p.wait()
-    verbose = p.stdout.read().decode()
+    verbose = p.stdout.read().decode('utf-8')
     if ret != 0: raise Exception(verbose)
     return verbose
 
@@ -206,16 +206,18 @@ def win_get_interfaces():
             adNode = a.ipAddressList
             while True:
                 #convert ipAddr and ipMask into hex addrs that can be turned into a bcast addr
-                ipAddr = adNode.ipAddress.decode()
-                ipMask = adNode.ipMask.decode()
+                try:
+                    ipAddr = adNode.ipAddress.decode()
+                    ipMask = adNode.ipMask.decode()
+                except: ipAddr = None
                 if ipAddr and ipMask:
                     hexAddr = struct.unpack("<L", socket.inet_aton(ipAddr))[0]
                     hexMask = struct.unpack("<L", socket.inet_aton(ipMask))[0]
                     if(hexAddr and hexMask): #don't broadcast on 255.255.255.255, that's just lame
                         yield socket.inet_ntoa(struct.pack("<L", (hexAddr & hexMask) | (~hexMask) & 0xFFFFFFFF))
-                adNode = adNode.next
-                if not adNode:
-                    break
+                try: adNode = adNode.next
+                except: break
+                if not adNode: break
 
 def enumerate_devices():
     for bcast_addr in get_interfaces():
@@ -230,7 +232,9 @@ def enumerate_devices():
                 pkt = sock.recv(UDP_MAX_XFER_BYTES)
                 (proto_ver, pktid, rxseq, ip_addr) = unpack_flash_ip_fmt(pkt)
                 if(pktid == update_id_t.USRP2_FW_UPDATE_ID_OHAI_OMG):
-                    yield socket.inet_ntoa(struct.pack("<L", socket.ntohl(ip_addr)))
+                    use_addr = socket.inet_ntoa(struct.pack("<L", socket.ntohl(ip_addr)))
+                    burner = burner_socket(use_addr, True)
+                    yield "%s (%s)" % (socket.inet_ntoa(struct.pack("<L", socket.ntohl(ip_addr))), n2xx_revs[burner.get_hw_rev()][0])
             except socket.timeout:
                 still_goin = False
 
@@ -238,12 +242,13 @@ def enumerate_devices():
 # Burner class, holds a socket and send/recv routines
 ########################################################################
 class burner_socket(object):
-    def __init__(self, addr):
+    def __init__(self, addr, quiet):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._quiet = quiet
         self._sock.settimeout(UDP_TIMEOUT)
         self._sock.connect((addr, UDP_FW_UPDATE_PORT))
         self.set_callbacks(lambda *a: None, lambda *a: None)
-        self.init_update() #check that the device is there
+        self.init_update(quiet) #check that the device is there
         self.get_hw_rev()
 
     def set_callbacks(self, progress_cb, status_cb):
@@ -255,13 +260,13 @@ class burner_socket(object):
         return self._sock.recv(UDP_MAX_XFER_BYTES)
 
     #just here to validate comms
-    def init_update(self):
+    def init_update(self,quiet):
         out_pkt = pack_flash_args_fmt(USRP2_FW_PROTO_VERSION, update_id_t.USRP2_FW_UPDATE_ID_OHAI_LOL, seq(), 0, 0)
         try: in_pkt = self.send_and_recv(out_pkt)
         except socket.timeout: raise Exception("No response from device")
         (proto_ver, pktid, rxseq, ip_addr) = unpack_flash_ip_fmt(in_pkt)
         if pktid == update_id_t.USRP2_FW_UPDATE_ID_OHAI_OMG:
-            print("USRP-N2XX found.")
+            if not quiet: print("USRP-N2XX found.")
         else:
             raise Exception("Invalid reply received from device.")
 
@@ -292,7 +297,7 @@ class burner_socket(object):
         (flash_size, sector_size) = self.get_flash_info()
         hw_rev = self.get_hw_rev()
 
-        if n2xx_revs.has_key(hw_rev): print("Hardware type: %s" % n2xx_revs[hw_rev][0][0])
+        if hw_rev in n2xx_revs: print("Hardware type: %s" % n2xx_revs[hw_rev][0][0])
         print("Flash size: %i\nSector size: %i\n" % (flash_size, sector_size))
 
         if erase:
@@ -528,6 +533,7 @@ if __name__=='__main__':
     if options.list:
         print('Possible network devices:')
         print('  ' + '\n  '.join(enumerate_devices()))
+        #enumerate_devices()
         exit()
 
     if not options.addr: raise Exception('no address specified')
@@ -542,7 +548,7 @@ if __name__=='__main__':
         response = raw_input("""Type "yes" to continue, or anything else to quit: """)
         if response != "yes": sys.exit(0)
 
-    burner = burner_socket(addr=options.addr)
+    burner = burner_socket(addr=options.addr,quiet=False)
 
     if options.read:
         hw_rev = burner.get_hw_rev()

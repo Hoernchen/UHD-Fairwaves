@@ -38,7 +38,7 @@
 // Setting register offsets
 ////////////////////////////////////////////////////////////////////////
 #define SR_MISC       0   // 7 regs
-#define SR_SIMTIMER   8   // 2
+#define SR_USER_REGS  8   // 2
 #define SR_TIME64    10   // 6
 #define SR_BUF_POOL  16   // 4
 
@@ -113,11 +113,11 @@
 ////////////////////////////////////////////////
 #define U2_REG_STATUS READBACK_BASE + 4*8
 #define U2_REG_GPIO_RB READBACK_BASE + 4*9
-#define U2_REG_TIME64_SECS_RB_IMM READBACK_BASE + 4*10
-#define U2_REG_TIME64_TICKS_RB_IMM READBACK_BASE + 4*11
+#define U2_REG_TIME64_HI_RB_IMM READBACK_BASE + 4*10
+#define U2_REG_TIME64_LO_RB_IMM READBACK_BASE + 4*11
 #define U2_REG_COMPAT_NUM_RB READBACK_BASE + 4*12
 #define U2_REG_IRQ_RB READBACK_BASE + 4*13
-#define U2_REG_TIME64_SECS_RB_PPS READBACK_BASE + 4*14
-#define U2_REG_TIME64_TICKS_RB_PPS READBACK_BASE + 4*15
+#define U2_REG_TIME64_HI_RB_PPS READBACK_BASE + 4*14
+#define U2_REG_TIME64_LO_RB_PPS READBACK_BASE + 4*15
 
-#endif
+#endif /* INCLUDED_UMTRX_REGS_HPP */

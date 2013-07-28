@@ -1,5 +1,5 @@
 #
-# Copyright 2010-2011 Ettus Research LLC
+# Copyright 2010-2012 Ettus Research LLC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -69,11 +69,18 @@ IF((DEBIAN OR REDHAT) AND LSB_RELEASE_EXECUTABLE)
     )
 
     #set a more sensible package name for this system
-    SET(CPACK_PACKAGE_FILE_NAME "UHD-${UHD_VERSION}-${LSB_ID}-${LSB_RELEASE}-${CMAKE_SYSTEM_PROCESSOR}")
+    SET(CPACK_PACKAGE_FILE_NAME "uhd_${UHD_VERSION}_${LSB_ID}-${LSB_RELEASE}-${CMAKE_SYSTEM_PROCESSOR}")
 
 ENDIF()
 
 IF(${CPACK_GENERATOR} STREQUAL NSIS)
+
+    ENABLE_LANGUAGE(C)
+
+    include(CheckTypeSize)
+    check_type_size("void*[8]" BIT_WIDTH BUILTIN_TYPES_ONLY)
+    SET(CPACK_PACKAGE_FILE_NAME "uhd_${UHD_VERSION}_Win${BIT_WIDTH}")
+
     SET(CPACK_PACKAGE_INSTALL_DIRECTORY "${CMAKE_PROJECT_NAME}")
 ENDIF()
 
@@ -83,12 +90,17 @@ ENDIF()
 SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Ettus Research - USRP Hardware Driver")
 SET(CPACK_PACKAGE_VENDOR              "Ettus Research LLC")
 SET(CPACK_PACKAGE_CONTACT             "Ettus Research <support@ettus.com>")
-SET(CPACK_PACKAGE_VERSION_MAJOR ${UHD_VERSION_MAJOR})
-SET(CPACK_PACKAGE_VERSION_MINOR ${UHD_VERSION_MINOR})
-SET(CPACK_PACKAGE_VERSION_PATCH ${UHD_VERSION_PATCH})
+SET(CPACK_PACKAGE_VERSION "${UHD_VERSION}")
 SET(CPACK_RESOURCE_FILE_WELCOME ${CMAKE_SOURCE_DIR}/README.txt)
 SET(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/AUTHORS.txt)
 SET(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE.txt)
+
+########################################################################
+# Setup CPack Source
+########################################################################
+
+SET(CPACK_SOURCE_PACKAGE_FILE_NAME "uhd-source_${UHD_VERSION}")
+SET(CPACK_SOURCE_IGNORE_FILES "\\\\.git*")
 
 ########################################################################
 # Setup CPack Components
@@ -133,7 +145,7 @@ SET(CPACK_COMPONENTS_ALL libraries headers utilities examples tests manual doxyg
 ########################################################################
 # Setup CPack Debian
 ########################################################################
-SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libusb-1.0-0, libboost-dev")
+SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libusb-1.0-0, libboost-all-dev")
 SET(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python, python-tk")
 FOREACH(filename preinst postinst prerm postrm)
     LIST(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA ${CMAKE_BINARY_DIR}/debian/${filename})
@@ -143,6 +155,10 @@ FOREACH(filename preinst postinst prerm postrm)
         ${CMAKE_BINARY_DIR}/debian/${filename}
     @ONLY)
 ENDFOREACH(filename)
+CONFIGURE_FILE(
+    ${CMAKE_SOURCE_DIR}/cmake/debian/watch
+    ${CMAKE_BINARY_DIR}/debian/watch
+@ONLY)
 
 ########################################################################
 # Setup CPack RPM

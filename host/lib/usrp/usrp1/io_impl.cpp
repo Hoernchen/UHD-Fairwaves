@@ -1,5 +1,5 @@
 //
-// Copyright 2010-2011 Ettus Research LLC
+// Copyright 2010-2012 Ettus Research LLC
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -21,9 +21,6 @@
 #define SSPH_DONT_PAD_TO_ONE
 #include "../../transport/super_send_packet_handler.hpp"
 #include "usrp1_calc_mux.hpp"
-#include "fpga_regs_standard.h"
-#include "fpga_regs_common.h"
-#include "usrp_commands.h"
 #include "usrp1_impl.hpp"
 #include <uhd/utils/msg.hpp>
 #include <uhd/utils/tasks.hpp>
@@ -35,6 +32,26 @@
 #include <boost/bind.hpp>
 #include <boost/format.hpp>
 #include <boost/make_shared.hpp>
+
+#define bmFR_RX_FORMAT_SHIFT_SHIFT 0
+#define bmFR_RX_FORMAT_WIDTH_SHIFT 4
+#define bmFR_TX_FORMAT_16_IQ       0
+#define bmFR_RX_FORMAT_WANT_Q      (0x1  <<  9)
+#define FR_RX_FREQ_0               34
+#define FR_RX_FREQ_1               35
+#define FR_RX_FREQ_2               36
+#define FR_RX_FREQ_3               37
+#define FR_INTERP_RATE             32
+#define FR_DECIM_RATE              33
+#define FR_RX_MUX                  38
+#define FR_TX_MUX                  39
+#define FR_TX_FORMAT               48
+#define FR_RX_FORMAT               49
+#define FR_TX_SAMPLE_RATE_DIV      0
+#define FR_RX_SAMPLE_RATE_DIV      1
+#define GS_TX_UNDERRUN             0
+#define GS_RX_OVERRUN              1
+#define VRQ_GET_STATUS             0x80
 
 using namespace uhd;
 using namespace uhd::usrp;
@@ -73,8 +90,8 @@ public:
         /* NOP */
     }
 
-    void commit(size_t size){
-        if (size != 0) this->_commit_cb(_curr_buff, _next_buff, size);
+    void release(void){
+        this->_commit_cb(_curr_buff, _next_buff, size());
     }
 
     sptr get_new(
@@ -83,13 +100,13 @@ public:
     ){
         _curr_buff = curr_buff;
         _next_buff = next_buff;
-        return make_managed_buffer(this);
+        return make(this,
+            _curr_buff.buff->cast<char *>() + _curr_buff.offset,
+            _curr_buff.buff->size()         - _curr_buff.offset
+        );
     }
 
 private:
-    void  *get_buff(void) const{return _curr_buff.buff->cast<char *>() + _curr_buff.offset;}
-    size_t get_size(void) const{return _curr_buff.buff->size()         - _curr_buff.offset;}
-
     offset_send_buffer _curr_buff, _next_buff;
     commit_cb_type _commit_cb;
 };
@@ -221,17 +238,17 @@ void usrp1_impl::io_init(void){
 
     _io_impl = UHD_PIMPL_MAKE(io_impl, (_data_transport));
 
-    //create a new vandal thread to poll xerflow conditions
-    _io_impl->vandal_task = task::make(boost::bind(
-        &usrp1_impl::vandal_conquest_loop, this
-    ));
-
     //init as disabled, then call the real function (uses restore)
     this->enable_rx(false);
     this->enable_tx(false);
     rx_stream_on_off(false);
     tx_stream_on_off(false);
     _io_impl->flush_send_buff();
+
+    //create a new vandal thread to poll xerflow conditions
+    _io_impl->vandal_task = task::make(boost::bind(
+        &usrp1_impl::vandal_conquest_loop, this
+    ));
 }
 
 void usrp1_impl::rx_stream_on_off(bool enb){
@@ -549,8 +566,16 @@ double usrp1_impl::update_rx_dsp_freq(const size_t dspno, const double freq_){
 }
 
 double usrp1_impl::update_tx_dsp_freq(const size_t dspno, const double freq){
-    //map the freq shift key to a subdev spec to a particular codec chip
-    _dbc[_tx_subdev_spec.at(dspno).db_name].codec->set_duc_freq(freq, _master_clock_rate);
+    const subdev_spec_pair_t pair = _tx_subdev_spec.at(dspno);
+
+    //determine the connection type and hence, the sign
+    const std::string conn = _tree->access<std::string>(str(boost::format(
+        "/mboards/0/dboards/%s/tx_frontends/%s/connection"
+    ) % pair.db_name % pair.sd_name)).get();
+    double sign = (conn == "I" or conn == "IQ")? +1.0 : -1.0;
+
+    //map this DSP's subdev spec to a particular codec chip
+    _dbc[pair.db_name].codec->set_duc_freq(sign*freq, _master_clock_rate);
     return freq; //assume infinite precision
 }
 
@@ -651,7 +676,8 @@ tx_streamer::sptr usrp1_impl::get_tx_stream(const uhd::stream_args_t &args_){
     _iface->poke32(FR_TX_FORMAT, bmFR_TX_FORMAT_16_IQ);
 
     //calculate packet size
-    const size_t bpp = _data_transport->get_send_frame_size()/args.channels.size();
+    size_t bpp = _data_transport->get_send_frame_size()/args.channels.size();
+    bpp -= alignment_padding - 1; //minus the max remainder after LUT commit
     const size_t spp = bpp/convert::get_bytes_per_item(args.otw_format);
 
     //make the new streamer given the samples per packet

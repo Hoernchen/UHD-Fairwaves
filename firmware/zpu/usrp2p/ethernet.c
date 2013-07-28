@@ -70,7 +70,7 @@ ed_link_up(int speed)
 
   ed_set_mac_speed(speed);
 
-  //turn on link LED for USRP2P
+	//turn on link LED for USRP2P
   hal_set_leds(led, led);
 
 
@@ -83,7 +83,7 @@ ed_link_down(void)
 {
   // putstr("ed_link_down\n");
 
-  //turn off link LED for USRP2P
+	//turn off link LED for USRP2P
   hal_set_leds(0, LED_RJ45_ORANGE);
   hal_set_leds(0, LED_RJ45_GREEN);
 
