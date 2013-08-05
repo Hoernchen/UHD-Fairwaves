@@ -122,4 +122,5 @@ void do_the_bootload_thing(void) {
 	}
     puts("ERROR: no safe firmware image available. Falling through to built-in firmware.");
     */
+#endif
 }
