@@ -42,10 +42,12 @@
 #define SR_TIME64    10   // 6
 #define SR_BUF_POOL  16   // 4
 
-#define SR_RX_FRONT0  20   // 5
-#define SR_RX_FRONT1  25   // 5
+#undef SR_RX_FRONT
+#define SR_RX_FRONT  23   // 5
+#define SR_RX_FRONT1  28   // 5
 
-#define SR_RX_CTRL0  32   // 9
+#undef SR_RX_CTRL0
+#define SR_RX_CTRL0  33   // 9
 #define SR_RX_DSP0   48   // 7
 #define SR_RX_CTRL1  80   // 9
 #define SR_RX_DSP1   96   // 7

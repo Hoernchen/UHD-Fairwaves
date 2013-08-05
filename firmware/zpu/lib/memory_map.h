@@ -304,6 +304,7 @@ typedef struct {
   volatile uint32_t ip_addr;
   volatile uint32_t data_ports; //dsp0 (low 16) dsp1 (high 16)
   volatile uint32_t iface_ctrl;
+  volatile uint32_t data_ports2;
 } router_ctrl_t;
 
 #define router_ctrl ((router_ctrl_t *) _SR_ADDR(SR_BUF_POOL))
@@ -354,7 +355,7 @@ typedef struct {
 typedef struct{
     struct{
         volatile uint32_t entry[16];
-    } table[4];
+    } table[5];
 } sr_proto_framer_t;
 
 #define sr_proto_framer_regs ((sr_proto_framer_t *) _SR_ADDR(SR_UDP_SM))

@@ -400,6 +400,7 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         ));
         //set the filter on the router to take dsp data from this port
         _mbc[mb].iface->poke32(U2_REG_ROUTER_CTRL_PORTS, (USRP2_UDP_FIFO_CRTL_PORT << 16) | USRP2_UDP_TX_DSP0_PORT);
+		_mbc[mb].iface->poke32(U2_REG_ROUTER_CTRL_PORTS+8, USRP2_UDP_FIFO_CRTL_PORT);
 
         //create the fifo control interface for high speed register access
         _mbc[mb].fifo_ctrl = usrp2_fifo_ctrl::make(_mbc[mb].fifo_ctrl_xport);
@@ -489,7 +490,7 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         // create frontend control objects
         ////////////////////////////////////////////////////////////////
         _mbc[mb].rx_fes.push_back(rx_frontend_core_200::make(
-            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_RX_FRONT0)
+            _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_RX_FRONT)
         ));
         _mbc[mb].tx_fes.push_back(tx_frontend_core_200::make(
             _mbc[mb].wbiface, U2_REG_SR_ADDR(SR_TX_FRONT0)

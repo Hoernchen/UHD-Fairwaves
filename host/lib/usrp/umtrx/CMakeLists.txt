@@ -1,5 +1,5 @@
 #
-# Copyright 2013 Fairwaves
+# Copyright 2012 Fairwaves
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,15 +20,15 @@
 ########################################################################
 
 ########################################################################
-# Conditionally configure the USRP2 support
+# Conditionally configure the UmTRX support
 ########################################################################
-LIBUHD_REGISTER_COMPONENT("USRP2" ENABLE_USRP2 ON "ENABLE_LIBUHD" OFF)
+LIBUHD_REGISTER_COMPONENT("UMTRX" ENABLE_UMTRX ON "ENABLE_LIBUHD" OFF)
 
-IF(ENABLE_USRP2)
+IF(ENABLE_UMTRX)
     LIBUHD_APPEND_SOURCES(
         ${CMAKE_CURRENT_SOURCE_DIR}/dboard_iface.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/io_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/umtrx_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/lms6002d.cpp
     )
-ENDIF(ENABLE_USRP2)
+ENDIF(ENABLE_UMTRX)

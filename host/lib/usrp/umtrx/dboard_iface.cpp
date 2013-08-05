@@ -18,6 +18,7 @@
 #include "gpio_core_200.hpp"
 #include <uhd/types/serial.hpp>
 //#include "clock_ctrl.hpp"
+#include "../usrp2/usrp2_iface.hpp"
 #include "umtrx_regs.hpp" //wishbone address constants
 #include <uhd/usrp/dboard_iface.hpp>
 #include <uhd/types/dict.hpp>
@@ -26,7 +27,6 @@
 #include <boost/assign/list_of.hpp>
 #include <boost/asio.hpp> //htonl and ntohl
 #include <boost/math/special_functions/round.hpp>
-#include "../usrp2/usrp2_iface.hpp"
 #include <cstdio>
 
 using namespace uhd;

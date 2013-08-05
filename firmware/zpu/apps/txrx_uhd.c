@@ -384,7 +384,7 @@ main(void)
 
   //1) register the addresses into the network stack
   register_addrs(ethernet_mac_addr(), get_ip_addr());
-  pkt_ctrl_program_inspector(get_ip_addr(), USRP2_UDP_TX_DSP0_PORT, USRP2_UDP_TX_DSP1_PORT);
+  pkt_ctrl_program_inspector(get_ip_addr(), USRP2_UDP_TX_DSP0_PORT, USRP2_UDP_TX_DSP1_PORT, USRP2_UDP_FIFO_CRTL_PORT);
 
   //2) register callbacks for udp ports we service
   init_udp_listeners();
