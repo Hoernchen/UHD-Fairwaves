@@ -24,7 +24,7 @@
 /***********************************************************************
  * Constants
  **********************************************************************/
-#define MAX_NUM_UARTS 4
+#define MAX_NUM_UARTS 3
 #ifndef UDP_UART_MASK
     #error missing definition for UDP_UART_MASK enable mask
 #endif
