@@ -59,7 +59,7 @@ public:
         const size_t dsp_base, const size_t ctrl_base,
         const boost::uint32_t sid, const bool lingering_packet
     ):
-        _iface(iface), _dsp_base(dsp_base), _ctrl_base(ctrl_base), _sid(sid)
+        _iface(iface), _dsp_base(dsp_base), _ctrl_base(ctrl_base), _sid(sid), _tick_rate(0)
     {
         //init to something so update method has reasonable defaults
         _scaling_adjustment = 1.0;
