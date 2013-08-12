@@ -203,7 +203,7 @@ public:
           _ad9510_regs.output_level_lvds_out6 = ad9510_regs_t::OUTPUT_LEVEL_LVDS_OUT6_1_75MA;
           break;
 // needed to make USRP utilities like usrp_burn_mb_eeprom work with UmTRX
-	case usrp2_iface::UMTRX_REV0: break;
+    case usrp2_iface::UMTRX_REV0: break;
 
         default:
           //throw uhd::not_implemented_error("enable_tx_dboard_clock: unknown hardware version");

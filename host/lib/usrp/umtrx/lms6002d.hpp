@@ -135,22 +135,22 @@ public:
         return lms_read_shift(0x41, 0x1f, 0) - 35;
     }
 
-	/** Set Rx VGA1 gain.
-	gain is raw values [0 .. 127]
-	Returns the old gain value */
-	int8_t set_rx_vga1gain(int8_t gain){
-		if (not (0 <= gain and gain <= 127))
-			gain = 0;
-		int8_t old_bits = lms_write_bits(0x76, 0x7f, gain);
-		return old_bits & 0x7f;
-	}
+    /** Set Rx VGA1 gain.
+    gain is raw values [0 .. 127]
+    Returns the old gain value */
+    int8_t set_rx_vga1gain(int8_t gain){
+        if (not (0 <= gain and gain <= 127))
+            gain = 0;
+        int8_t old_bits = lms_write_bits(0x76, 0x7f, gain);
+        return old_bits & 0x7f;
+    }
 
-	/** Get Rx VGA1 gain in dB.
-	gain is in [0 .. 127] range of abstract values
-	Returns the gain value */
-	int8_t get_rx_vga1gain(){
-		return lms_read_shift(0x76, 0x7f, 0);
-	}
+    /** Get Rx VGA1 gain in dB.
+    gain is in [0 .. 127] range of abstract values
+    Returns the gain value */
+    int8_t get_rx_vga1gain(){
+        return lms_read_shift(0x76, 0x7f, 0);
+    }
 
     /**  Set VGA2 gain.
     gain is in dB [0 .. 25]

@@ -105,9 +105,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         ("args", po::value<std::string>(&args)->default_value(""), "device address args [default = \"\"]")
         ("tx_wave_ampl", po::value<double>(&tx_wave_ampl)->default_value(0.7), "Transmit wave amplitude in counts")
         ("tx_offset", po::value<double>(&tx_offset)->default_value(1e6), "TX LO offset from the RX LO in Hz")
-	("compl_i", po::value<double>(&compl_i), "Enforced correction for I (complex)")
+    ("compl_i", po::value<double>(&compl_i), "Enforced correction for I (complex)")
         ("compl_q", po::value<double>(&compl_q), "Enforced correction for Q (complex)")
-	("polar_i", po::value<double>(&polar_i), "Enforced correction for I (polar)")
+    ("polar_i", po::value<double>(&polar_i), "Enforced correction for I (polar)")
         ("polar_q", po::value<double>(&polar_q), "Enforced correction for Q (polar)")
         ("freq_start", po::value<double>(&freq_start), "Frequency start in Hz (do not specify for default)")
         ("freq_stop", po::value<double>(&freq_stop), "Frequency stop in Hz (do not specify for default)")
@@ -135,16 +135,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     //apply manual corrections
     if (vm.count("compl_i") and vm.count("compl_q")) {
-	std::cout << "Applying complex I/Q corrections <" << compl_i << ", " << compl_q << ">...";
-	usrp->set_rx_iq_balance(std::complex<double>(compl_i, compl_q));
-	std::cout << "done. Exit.\n";
-	return 0;
+    std::cout << "Applying complex I/Q corrections <" << compl_i << ", " << compl_q << ">...";
+    usrp->set_rx_iq_balance(std::complex<double>(compl_i, compl_q));
+    std::cout << "done. Exit.\n";
+    return 0;
     }
     if (vm.count("polar_i") and vm.count("polar_q")) {
-	std::cout << "Applying polar I/Q corrections <" << polar_i << ", " << polar_q << ">...";
-	usrp->set_rx_iq_balance(std::polar<double>(polar_i, polar_q));
-	std::cout << "done. Exit.\n";
-	return 0;
+    std::cout << "Applying polar I/Q corrections <" << polar_i << ", " << polar_q << ">...";
+    usrp->set_rx_iq_balance(std::polar<double>(polar_i, polar_q));
+    std::cout << "done. Exit.\n";
+    return 0;
     }
 
     //set the antennas to cal

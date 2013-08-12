@@ -424,7 +424,7 @@ public:
         case USRP_N210:    fpga_image = "usrp_n210_r2_fpga.bin"; fw_image = "usrp_n210_fw.bin"; break;
         case USRP_N200_R4: fpga_image = "usrp_n200_r4_fpga.bin"; fw_image = "usrp_n200_fw.bin"; break;
         case USRP_N210_R4: fpga_image = "usrp_n210_r4_fpga.bin"; fw_image = "usrp_n210_fw.bin"; break;
-		case UMTRX_REV0:   fpga_image = "usrp2_fpga.bin";        fw_image = "usrp2_fw.bin";     break;
+        case UMTRX_REV0:   fpga_image = "usrp2_fpga.bin";        fw_image = "usrp2_fw.bin";     break;
         default: break;
         }
         if (fw_image.empty() or fpga_image.empty()) return "";
