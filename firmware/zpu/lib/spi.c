@@ -51,5 +51,5 @@ uint32_t spi_transact(bool readback, int slave, uint32_t data, int length, uint3
     if (!readback) return 0;
 
     spi_wait();
-    return readback_mux->spi;
+    return readback_mux->spi & ((uint32_t)-1 >> (32 - length));
 }
