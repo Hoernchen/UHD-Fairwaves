@@ -35,6 +35,7 @@ static const double ACK_TIMEOUT = 0.5;
 static const double MASSIVE_TIMEOUT = 10.0; //for when we wait on a timed command
 static const boost::uint32_t MAX_SEQS_OUT = 15;
 
+#undef SR_SPI_CORE
 #define SPI_DIV SR_SPI_CORE + 0
 #define SPI_CTRL SR_SPI_CORE + 1
 #define SPI_DATA SR_SPI_CORE + 2
@@ -43,13 +44,15 @@ static const boost::uint32_t MAX_SEQS_OUT = 15;
 #define SPI_DIVIDER 4
 
 class usrp2_fifo_ctrl_impl : public usrp2_fifo_ctrl{
+    wb_addr_type SR_SPI_CORE;
 public:
 
-    usrp2_fifo_ctrl_impl(zero_copy_if::sptr xport):
+    usrp2_fifo_ctrl_impl(zero_copy_if::sptr xport, wb_addr_type spi_base):
         _xport(xport),
         _seq_out(0),
         _seq_ack(0),
-        _timeout(ACK_TIMEOUT)
+        _timeout(ACK_TIMEOUT),
+        SR_SPI_CORE(spi_base)
     {
         while (_xport->get_recv_buff(0.0)){} //flush
         this->set_time(uhd::time_spec_t(0.0));
@@ -239,6 +242,6 @@ private:
 };
 
 
-usrp2_fifo_ctrl::sptr usrp2_fifo_ctrl::make(zero_copy_if::sptr xport){
-    return sptr(new usrp2_fifo_ctrl_impl(xport));
+usrp2_fifo_ctrl::sptr usrp2_fifo_ctrl::make(zero_copy_if::sptr xport, wb_addr_type spi_base){
+    return sptr(new usrp2_fifo_ctrl_impl(xport, spi_base));
 }

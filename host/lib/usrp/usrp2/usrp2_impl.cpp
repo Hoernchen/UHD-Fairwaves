@@ -400,7 +400,7 @@ usrp2_impl::usrp2_impl(const device_addr_t &_device_addr){
         _mbc[mb].iface->poke32(U2_REG_ROUTER_CTRL_PORTS, (USRP2_UDP_FIFO_CRTL_PORT << 16) | USRP2_UDP_TX_DSP0_PORT);
 
         //create the fifo control interface for high speed register access
-        _mbc[mb].fifo_ctrl = usrp2_fifo_ctrl::make(_mbc[mb].fifo_ctrl_xport);
+        _mbc[mb].fifo_ctrl = usrp2_fifo_ctrl::make(_mbc[mb].fifo_ctrl_xport, SR_SPI_CORE);
         switch(_mbc[mb].iface->get_rev()){
         case usrp2_iface::USRP_N200:
         case usrp2_iface::USRP_N210:

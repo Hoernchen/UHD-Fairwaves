@@ -403,7 +403,7 @@ umtrx_impl::umtrx_impl(const device_addr_t &_device_addr)
         _mbc[mb].iface->poke32(U2_REG_ROUTER_CTRL_PORTS+8, ((uint32_t)USRP2_UDP_TX_DSP1_PORT << 16));
 
         //create the fifo control interface for high speed register access
-        _mbc[mb].fifo_ctrl = usrp2_fifo_ctrl::make(_mbc[mb].fifo_ctrl_xport);
+        _mbc[mb].fifo_ctrl = usrp2_fifo_ctrl::make(_mbc[mb].fifo_ctrl_xport, SR_SPI_CORE);
         switch(_mbc[mb].iface->get_rev()){
         case usrp2_iface::USRP_N200:
         case usrp2_iface::USRP_N210:

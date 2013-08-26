@@ -35,7 +35,7 @@ public:
     typedef boost::shared_ptr<usrp2_fifo_ctrl> sptr;
 
     //! Make a new FIFO control object
-    static sptr make(uhd::transport::zero_copy_if::sptr xport);
+    static sptr make(uhd::transport::zero_copy_if::sptr xport, wb_addr_type spi_base);
 
     //! Set the command time that will activate
     virtual void set_time(const uhd::time_spec_t &time) = 0;
