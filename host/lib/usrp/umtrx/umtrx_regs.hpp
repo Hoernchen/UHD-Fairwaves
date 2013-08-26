@@ -40,22 +40,24 @@
 #define SR_MISC       0   // 7 regs
 #define SR_USER_REGS  8   // 2
 #define SR_TIME64    10   // 6
-#define SR_BUF_POOL  16   // 4
+#define SR_BUF_POOL  16   // 5
+#undef SR_SPI_CORE
+#define SR_SPI_CORE  21   // 3
 
 #undef SR_RX_FRONT
-#define SR_RX_FRONT  23   // 5
-#define SR_RX_FRONT1  28   // 5
+#define SR_RX_FRONT  24   // 5
+#define SR_RX_FRONT1  29   // 5
 
 #undef SR_RX_CTRL0
-#define SR_RX_CTRL0  33   // 9
+#define SR_RX_CTRL0  34   // 10
 #define SR_RX_DSP0   48   // 7
-#define SR_RX_CTRL1  80   // 9
+#define SR_RX_CTRL1  80   // 10
 #define SR_RX_DSP1   96   // 7
 
-#define SR_TX_FRONT0 110   // ?
+#define SR_TX_FRONT0 110   // 5
 #define SR_TX_CTRL0  126   // 6
 #define SR_TX_DSP0   135   // 5
-#define SR_TX_FRONT1 145   // ?
+#define SR_TX_FRONT1 145   // 5
 #define SR_TX_CTRL1  161   // 6
 #define SR_TX_DSP1   170   // 5
 

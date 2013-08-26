@@ -248,19 +248,19 @@ typedef struct {
 #define SR_MISC       0   // 7 regs
 #define SR_SIMTIMER   8   // 2
 #define SR_TIME64    10   // 6
-#define SR_BUF_POOL  16   // 4
-#define SR_SPI_CORE  20   // 3
+#define SR_BUF_POOL  16   // 5
+#define SR_SPI_CORE  21   // 3
 
 #ifndef UMTRX
 #define SR_RX_FRONT  24   // 5
 #else
-#define SR_RX_FRONT  23   // 5
-#define SR_RX_FRONT1  28   // 5
+#define SR_RX_FRONT  24   // 5
+#define SR_RX_FRONT1  29   // 5
 #endif
 
-#define SR_RX_CTRL0  33   // 9
+#define SR_RX_CTRL0  34   // 10
 #define SR_RX_DSP0   48   // 7
-#define SR_RX_CTRL1  80   // 9
+#define SR_RX_CTRL1  80   // 10
 #define SR_RX_DSP1   96   // 7
 
 #ifndef UMTRX
