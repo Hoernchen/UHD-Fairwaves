@@ -17,8 +17,6 @@
 
 #include "gpio_core_200.hpp"
 #include <uhd/types/serial.hpp>
-//#include "clock_ctrl.hpp"
-#include "../usrp2/usrp2_iface.hpp"
 #include "umtrx_regs.hpp" //wishbone address constants
 #include <uhd/usrp/dboard_iface.hpp>
 #include <uhd/types/dict.hpp>
@@ -34,7 +32,6 @@ using namespace uhd::usrp;
 using namespace boost::assign;
 
 class umtrx_dboard_iface : public dboard_iface{
-    //usrp2_iface::sptr _iface;
     uhd::i2c_iface::sptr _i2c_iface;
     uhd::spi_iface::sptr _spi_iface;
     const std::string _dboard;
@@ -48,7 +45,7 @@ public:
     uhd::spi_iface::sptr spi_iface,
  const std::string board,
  double ref_clk)
-        : /*_iface(iface),*/ _dboard(board),
+        : _dboard(board),
           _ref_clk(ref_clk),
           _lms_spi_number(board=="A"?SPI_SS_LMS1:SPI_SS_LMS2),
           _adf4350_spi_number(board=="A"?SPI_SS_AUX1:SPI_SS_AUX2),

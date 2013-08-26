@@ -24,6 +24,7 @@
 #include "../usrp2/usrp2_iface.hpp"
 #include "../usrp2/usrp2_impl.hpp"
 #include "../usrp2/usrp2_fifo_ctrl.hpp"
+#include "umtrx_regs.hpp" //wishbone address constants
 #include "rx_frontend_core_200.hpp"
 #include "tx_frontend_core_200.hpp"
 #include "rx_dsp_core_200.hpp"
